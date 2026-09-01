@@ -34,6 +34,56 @@ PASTA_NO_REPO = "fotos_recebidas"
 
 st.set_page_config(page_title="SMFC Mobile", page_icon="📦")
 
+# O BOTÃO DE TIRAR FOTO.
+#
+# O `st.camera_input` antigo mostrava um botão "Tirar Foto" na própria página -
+# e era isso que dava a foto de 344x421, porque ele captura no tamanho do widget.
+# O `st.file_uploader`, que usa a câmera do aparelho e dá a resolução de verdade,
+# vem com um botão que diz "Upload": ninguém olha isso e pensa em fotografar.
+#
+# Então o rótulo do botão é trocado aqui, por CSS. É CSS no documento da própria
+# página (o `st.markdown` injeta no DOM do app, sem iframe), e não um truque de
+# JavaScript mexendo no DOM de fora - se um dia o Streamlit mudar as classes, o
+# botão volta a dizer "Upload" e CONTINUA FUNCIONANDO. A falha é cosmética, não
+# quebra o envio.
+st.markdown("""
+    <style>
+    /* O botão do uploader vira o botão de tirar foto: grande, colorido, e com
+       texto em português. */
+    [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] {
+        width: 100% !important;
+        min-height: 4.2em !important;
+        background-color: #d92d20 !important;
+        border: none !important;
+        border-radius: 12px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    /* Esconde o "Upload" original SEM removê-lo - leitor de tela continua lendo,
+       e o texto novo fica centralizado porque o antigo deixa de ocupar espaço.
+       (É o padrão "visually hidden"; font-size: 0 sozinho descentralizava.) */
+    [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] > * {
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        overflow: hidden !important;
+        clip-path: inset(50%) !important;
+    }
+    [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"]::after {
+        content: "📸  TIRAR FOTO";
+        color: #ffffff;
+        font-size: 1.35rem;
+        font-weight: 800;
+        letter-spacing: .5px;
+    }
+    /* A linha "200MB per file • JPG, PNG..." é do Streamlit e vem em inglês. */
+    [data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }
+    /* O radio Entrada/Saída maior, que é escolha de dedo dentro do caminhão. */
+    [data-testid="stRadio"] label p { font-size: 1.15rem !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
 
 def enviar_ao_github(nome, conteudo):
     """(ok, recado). O recado traz o que o GitHub respondeu, e não um palpite.
@@ -135,7 +185,7 @@ tipo_fluxo = st.radio("Operação:", ["Entrada", "Saída"], horizontal=True)
 # que fotografa na resolução de verdade. E aceita várias de uma vez - carga
 # raramente é uma foto só.
 fotos = st.file_uploader(
-    "Tirar foto (ou escolher da galeria)",
+    "Toque no botão e escolha **Câmera** (ou a galeria, se a foto já está lá):",
     type=["jpg", "jpeg", "png", "heic", "heif"],
     accept_multiple_files=True)
 
