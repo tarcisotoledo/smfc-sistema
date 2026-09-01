@@ -1,161 +1,143 @@
-import streamlit as st
+"""Painel de auditoria: as fotos que as lojas mandaram, por loja e por dia.
+
+## Os dois defeitos corrigidos em 01/09/2026
+
+1. **A busca da loja casava por pedaço de texto.** `"LOJA2" in nome` é
+   verdadeiro para `LOJA20`, `LOJA22`, `LOJA23` e `LOJA24`. Medido nas 1.528
+   fotos: procurar a loja 2 (que tem **4** fotos) devolvia **432**; procurar a
+   loja 1 devolvia 603 fotos das lojas 10, 12, 14, 16, 18 e 19. Agora o número é
+   comparado inteiro, e não como trecho.
+
+2. **A FAXINA não apagava nada** — o botão só escrevia "Faxina concluída". Isso é
+   pior do que não existir: dava para acreditar que o disco havia sido limpo.
+   Agora ela conta o que vai apagar, pede confirmação e apaga de verdade **só a
+   cópia local** (o GitHub continua com tudo).
+
+## Sobre a hora das fotos antigas
+
+Até 01/09/2026 o app do celular nomeava os arquivos com a hora do servidor, que é
+UTC — três horas à frente do Brasil. A carga da noite (21h em diante) caía com a
+data do dia seguinte no nome. Por isso a busca inclui, para os arquivos anteriores
+ao corte, as três primeiras horas do dia seguinte: é lá que a foto da noite
+anterior foi arquivada. Ver a explicação em `app_celular.py`.
+"""
 import os
 from datetime import datetime, timedelta
 
-# Configuração da página do painel de controle
-st.set_page_config(
-    page_title="SMFC - Painel de Auditoria e Limpeza",
-    page_icon="🔍",
-    layout="wide"
-)
+import streamlit as st
 
-st.title("🔍 Sistema de Monitoramento de Fluxo de Cargas")
-st.subheader("Painel de Auditoria e Gestão de Arquivos")
+import foto_carga as fc
 
-# Caminho da pasta onde as fotos estão armazenadas no seu PC
-PASTA_FOTOS = "fotos_recebidas"
-DIAS_LIMITE = 90  # Regra dos 3 meses
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PASTA_FOTOS = os.path.join(BASE_DIR, "fotos_recebidas")
 
-# Função auxiliar para listar e filtrar as fotos com base nos critérios
-def buscar_fotos(tipo_fluxo, numero_loja, data_inicio, data_fim=None):
-    resultados = []
-    if not os.path.exists(PASTA_FOTOS):
-        return resultados
+DIAS_DA_FAXINA = 90
 
-    arquivos = os.listdir(PASTA_FOTOS)
-    for arquivo in arquivos:
-        if arquivo.lower().endswith(('.jpg', '.jpeg', '.png')):
-            partes = arquivo.replace(".jpg", "").split("_")
-            if len(partes) >= 3:
-                data_str, tipo_arq, loja_arq = partes[0], partes[1], partes[2]
-                try:
-                    data_compara = datetime.strptime(data_str, "%Y-%m-%d").date()
-                except ValueError:
-                    continue
-                
-                filtro_tipo = (tipo_arq == tipo_fluxo)
-                filtro_loja = (loja_arq == f"LOJA{numero_loja}")
-                
-                if data_fim:
-                    filtro_data = (data_inicio <= data_compara <= data_fim)
-                else:
-                    filtro_data = (data_compara == data_inicio)
-                    
-                if filtro_tipo and filtro_loja and filtro_data:
-                    resultados.append({
-                        "nome": arquivo,
-                        "caminho": os.path.join(PASTA_FOTOS, arquivo),
-                        "data": data_str
-                    })
-    return resultados
+st.set_page_config(page_title="Painel de Auditoria SMFC", page_icon="🔍", layout="wide")
 
-# --- CRIANÇÃO DAS ABAS (Agora com 3 abas!) ---
-aba_saida, aba_entrada, aba_limpeza = st.tabs([
-    "📤 Verificar Saída (Origem)", 
-    "📥 Verificar Entrada (Destino)", 
-    "🧹 Faxina Automática (Limpeza)"
-])
+st.markdown("""
+    <style>
+    html, body, [class*="ViewContainer"] { font-size: 22px !important; }
+    .stButton>button {
+        height: 4em;
+        width: 100%;
+        font-size: 24px !important;
+        font-weight: bold;
+        color: white !important;
+        background-color: #007bff !important;
+        border-radius: 10px;
+    }
+    .stTextInput>div>div>input { font-size: 22px !important; height: 3em; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# ABA 1: CONFERIR SAÍDA
-with aba_saida:
-    st.markdown("### Buscar Registro de Saída da Mercadoria")
+st.title("🔍 PAINEL DE AUDITORIA SMFC")
+
+
+def buscar_e_exibir(tipo):
     col1, col2 = st.columns(2)
     with col1:
-        loja_origem = st.text_input("Número da Loja de Origem:", placeholder="Ex: 3", key="loja_orig")
+        loja = st.text_input("Número da Loja:", key="loja_%s" % tipo)
     with col2:
-        data_saida = st.date_input("Data exata da Saída:", datetime.now().date(), key="data_sai")
-        
-    if st.button("Buscar Foto de Saída 🔍"):
-        if loja_origem.strip():
-            fotos_encontradas = buscar_fotos("SAIDA", loja_origem.strip(), data_saida)
-            if fotos_encontradas:
-                st.success(f"Encontrado {len(fotos_encontradas)} registro(s) de saída!")
-                for foto in fotos_encontradas:
-                    st.write(f"📁 Arquivo: `{foto['nome']}`")
-                    st.image(foto['caminho'], caption=f"Saída da Loja {loja_origem} em {foto['data']}", width=400)
-            else:
-                st.warning(f"Nenhum registro de SAÍDA encontrado para a Loja {loja_origem} na data selecionada.")
-        else:
-            st.error("Por favor, digite o número da loja de origem.")
+        data_sel = st.date_input("Data da Carga:", datetime.now(), key="data_%s" % tipo)
 
-# ABA 2: CONFERIR ENTRADA POR PERÍODO
+    if not st.button("CLIQUE AQUI PARA BUSCAR %s 🔍" % tipo.upper(), key="btn_%s" % tipo):
+        return
+
+    if not str(loja).strip().isdigit():
+        return st.warning("Digite o número da loja — só números, por exemplo 20.")
+
+    data_str = data_sel.strftime("%Y-%m-%d")
+    achadas, do_fuso = fc.fotos_de(PASTA_FOTOS, loja, data_str, tipo)
+
+    if not achadas and not do_fuso:
+        return st.warning("⚠️ Nenhuma foto de %s da Loja %s em %s."
+                          % (tipo, loja, data_sel.strftime('%d/%m/%Y')))
+
+    st.success("✅ %d foto(s) encontrada(s)." % (len(achadas) + len(do_fuso)))
+    if do_fuso:
+        st.caption("%d delas foram tiradas à noite e ficaram gravadas com a data "
+                   "do dia seguinte (fuso do servidor, corrigido em 01/09)."
+                   % len(do_fuso))
+
+    for nome in achadas + do_fuso:
+        caminho = os.path.join(PASTA_FOTOS, nome)
+        tamanho = os.path.getsize(caminho) // 1024
+        st.image(caminho, caption="%s  ·  %d KB" % (nome, tamanho),
+                 use_container_width=True)
+
+
+aba_saida, aba_entrada, aba_faxina = st.tabs(["📤 SAÍDA", "📥 ENTRADA", "🧹 FAXINA"])
+
+with aba_saida:
+    buscar_e_exibir("Saida")
+
 with aba_entrada:
-    st.markdown("### Buscar Registro de Chegada no Destino (Por Período)")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        loja_destino = st.text_input("Número da Loja de Destino:", placeholder="Ex: 17", key="loja_dest")
-    with col2:
-        data_inicio = st.date_input("Data Inicial do Período:", datetime.now().date())
-    with col3:
-        data_fim = st.date_input("Data Final do Período:", datetime.now().date())
-        
-    if st.button("Buscar Fotos no Período 🔍"):
-        if loja_destino.strip():
-            if data_inicio <= data_fim:
-                fotos_encontradas = buscar_fotos("ENTRADA", loja_destino.strip(), data_inicio, data_fim)
-                if fotos_encontradas:
-                    st.success(f"Encontrada(s) {len(fotos_encontradas)} foto(s) de entrada no período selecionado!")
-                    col_fotos = st.columns(min(len(fotos_encontradas), 3))
-                    for i, foto in enumerate(fotos_encontradas):
-                        idx_col = i % 3
-                        with col_fotos[idx_col]:
-                            st.write(f"`{foto['nome']}`")
-                            st.image(foto['caminho'], caption=f"Chegada na Loja {loja_destino} em {foto['data']}", use_container_width=True)
-                else:
-                    st.warning(f"Nenhum registro de ENTRADA encontrado para a Loja {loja_destino} entre {data_inicio} e {data_fim}.")
-            else:
-                st.error("Erro: A data inicial não pode ser maior que a data final.")
-        else:
-            st.error("Por favor, digite o número da loja de destino.")
+    buscar_e_exibir("Entrada")
 
-# ABA 3: MODULO DE EXCLUSÃO EM LOTE (A NOVIDADE)
-with aba_limpeza:
-    st.markdown("### 🧹 Gerenciamento de Espaço em Disco (Regra de 3 Meses)")
-    st.info(f"O sistema está configurado para manter as fotos por **{DIAS_LIMITE} dias**. Fotos mais antigas que isso podem ser removidas para liberar espaço.")
-    
-    data_limite = datetime.now() - timedelta(days=DIAS_LIMITE)
-    st.write(f"📅 **Data de corte atual:** Arquivos criados antes de **{data_limite.strftime('%d/%m/%Y')}** serão apagados.")
-    
-    # Faz uma varredura prévia para avisar o usuário se existem arquivos antigos
-    arquivos_antigos = []
-    total_arquivos = 0
-    
-    if os.path.exists(PASTA_FOTOS):
-        for arquivo in os.listdir(PASTA_FOTOS):
-            if arquivo.lower().endswith(('.jpg', '.jpeg', '.png')):
-                total_arquivos += 1
-                caminho_completo = os.path.join(PASTA_FOTOS, arquivo)
-                data_modificacao = datetime.fromtimestamp(os.path.getmtime(caminho_completo))
-                if data_modificacao < data_limite:
-                    arquivos_antigos.append(caminho_completo)
-    
-    # Mostra um resumo do que foi encontrado
-    col_inf1, col_inf2 = st.columns(2)
-    with col_inf1:
-        st.metric("Total de fotos armazenadas", total_arquivos)
-    with col_inf2:
-        st.metric("Fotos expiradas (Mais de 3 meses)", len(arquivos_antigos), delta_color="inverse")
-        
-    st.divider()
-    
-    # Botão de ação para deletar
-    if len(arquivos_antigos) > 0:
-        st.warning(f"Atenção: {len(arquivos_antigos)} fotos estão fora do prazo de validade de 3 meses.")
-        
-        # Caixa de confirmação para o usuário não clicar por engano
-        confirmar = st.checkbox("Eu confirmo que quero apagar essas fotos antigas em lote.")
-        
-        if st.button("🚨 Executar Limpeza em Lote", disabled=not confirmar):
-            contador_removidos = 0
-            for caminho in arquivos_antigos:
-                try:
-                    os.remove(caminho)
-                    contador_removidos += 1
-                except Exception as e:
-                    st.error(f"Erro ao apagar arquivo {caminho}: {e}")
-            
-            st.success(f"Sucesso! Faxina concluída. {contador_removidos} arquivos antigos foram eliminados permanentemente.")
-            st.balloons()
-            st.rerun()
+with aba_faxina:
+    st.subheader("🧹 Limpeza da cópia local")
+    st.write("Apaga da **sua máquina** as fotos com mais de %d dias. "
+             "O GitHub continua com todas — isto é só o espaço do disco daqui."
+             % DIAS_DA_FAXINA)
+
+    if not os.path.isdir(PASTA_FOTOS):
+        st.info("A pasta de fotos ainda não existe nesta máquina.")
     else:
-        st.success("✅ Tudo limpo! Nenhuma foto com mais de 3 meses foi encontrada no seu computador.")
+        corte = datetime.now() - timedelta(days=DIAS_DA_FAXINA)
+        velhas = []
+        for nome in os.listdir(PASTA_FOTOS):
+            partes = fc.partes_do_nome(nome)
+            if not partes:
+                continue
+            try:
+                quando = datetime.strptime(partes[0], "%Y-%m-%d")
+            except ValueError:
+                continue
+            if quando < corte:
+                velhas.append(nome)
+
+        espaco = sum(os.path.getsize(os.path.join(PASTA_FOTOS, n)) for n in velhas)
+        if not velhas:
+            st.success("Nada para apagar: nenhuma foto tem mais de %d dias."
+                       % DIAS_DA_FAXINA)
+        else:
+            st.warning("**%d foto(s)** com mais de %d dias, ocupando **%.1f MB**."
+                       % (len(velhas), DIAS_DA_FAXINA, espaco / 1048576))
+            # Apagar não tem volta daqui: confirma marcando, e não num clique só.
+            confirmou = st.checkbox("Sim, apagar essas fotos da cópia local")
+            if st.button("APAGAR AGORA"):
+                if not confirmou:
+                    st.warning("Marque a confirmação acima antes de apagar.")
+                else:
+                    apagadas, erros = 0, []
+                    for nome in velhas:
+                        try:
+                            os.remove(os.path.join(PASTA_FOTOS, nome))
+                            apagadas += 1
+                        except Exception as e:
+                            erros.append("%s (%s)" % (nome, e))
+                    st.success("%d foto(s) apagadas da cópia local." % apagadas)
+                    if erros:
+                        st.error("Não consegui apagar %d: %s"
+                                 % (len(erros), "; ".join(erros[:5])))

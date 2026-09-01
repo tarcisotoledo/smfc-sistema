@@ -1,4 +1,16 @@
 streamlit
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
+
+# requests era usado pelo app do celular e NAO estava aqui - funcionava de
+# carona numa dependencia do Streamlit. Dependencia de carona quebra no dia em
+# que a outra biblioteca muda.
+requests
+
+# Pillow: gira a foto pelo EXIF e reduz para 2048 px antes de enviar.
+Pillow
+
+# As tres do Google nao sao usadas por nenhum dos dois programas desta pasta -
+# ficaram de uma versao anterior. Deixadas fora para a instalacao do Streamlit
+# Cloud ser mais rapida; se algo aqui voltar a usar Google Drive, voltam:
+#   google-api-python-client
+#   google-auth-httplib2
+#   google-auth-oauthlib

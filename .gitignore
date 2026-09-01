@@ -1,0 +1,7 @@
+# Cache do Python: não é código, e enche o repositório de arquivo binário.
+__pycache__/
+*.pyc
+
+# Se um dia houver segredo local, ele NÃO pode subir: o token do GitHub mora nas
+# Secrets do Streamlit Cloud, nunca no repositório.
+.streamlit/secrets.toml
