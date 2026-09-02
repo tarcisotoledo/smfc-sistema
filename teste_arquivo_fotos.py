@@ -1,0 +1,167 @@
+# -*- coding: utf-8 -*-
+"""Prova do arquivo no HD, sem encostar no E: nem no repositório de verdade.
+
+    python teste_arquivo_fotos.py
+"""
+import os
+import shutil
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import arquivo_fotos as af
+
+PONTE = [
+    '2026-09-02_10-30-00-01_ENTRADA_LOJA14.jpg',
+    '2026-09-02_10-31-00-01_SAIDA_LOJA14.jpg',
+    '2026-08-31_16-00-00-01_ENTRADA_LOJA20.jpg',   # mês anterior
+    '2026-06-08_14-58-57_ENTRADA_LOJAL9.jpg',      # nome torto: NÃO se apaga
+    'desktop.ini',                                  # lixo: NÃO se apaga
+]
+
+
+def montar(nomes=PONTE, conteudo=b'foto'):
+    base = tempfile.mkdtemp(prefix='wf_arqfotos_')
+    ponte = os.path.join(base, 'fotos_recebidas')
+    arquivo = os.path.join(base, 'HD', 'Fotos_Cargas')
+    os.makedirs(ponte)
+    for n in nomes:
+        with open(os.path.join(ponte, n), 'wb') as f:
+            f.write(conteudo)
+    return base, ponte, arquivo
+
+
+def com_mundo(funcao):
+    def rodar():
+        base, ponte, arquivo = montar()
+        try:
+            funcao(ponte, arquivo)
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+    return rodar
+
+
+@com_mundo
+def teste_importa_em_pastas_por_mes(ponte, arquivo):
+    r = af.importar(ponte, arquivo)
+    assert r['erros'] == [], r['erros']
+    assert r['movidas'] == 3, r
+    # As pastas por mês: 450 fotos/mês num diretório só engasgam o Explorer.
+    assert sorted(os.listdir(arquivo)) == ['2026-08', '2026-09'], os.listdir(arquivo)
+    assert len(os.listdir(os.path.join(arquivo, '2026-09'))) == 2
+    assert len(os.listdir(os.path.join(arquivo, '2026-08'))) == 1
+    print('ok  importa para pastas AAAA-MM, separando os meses')
+
+
+@com_mundo
+def teste_a_ponte_fica_vazia_das_fotos(ponte, arquivo):
+    af.importar(ponte, arquivo)
+    sobraram = sorted(os.listdir(ponte))
+    # Só o que NÃO é foto reconhecível fica - e fica de propósito.
+    assert sobraram == ['2026-06-08_14-58-57_ENTRADA_LOJAL9.jpg', 'desktop.ini'], sobraram
+    print('ok  a ponte esvazia das fotos, e o que nao se entende NAO e apagado')
+
+
+@com_mundo
+def teste_nome_torto_e_devolvido_para_ele_ver(ponte, arquivo):
+    r = af.importar(ponte, arquivo)
+    assert '2026-06-08_14-58-57_ENTRADA_LOJAL9.jpg' in r['ignoradas'], r['ignoradas']
+    assert 'desktop.ini' in r['ignoradas']
+    print('ok  arquivo fora do padrao volta na lista, em vez de sumir calado')
+
+
+@com_mundo
+def teste_importar_duas_vezes_nao_duplica(ponte, arquivo):
+    af.importar(ponte, arquivo)
+    # Chega a mesma foto de novo (o celular reenviou):
+    with open(os.path.join(ponte, PONTE[0]), 'wb') as f:
+        f.write(b'foto')
+    r = af.importar(ponte, arquivo)
+    assert r['ja_existiam'] == 1 and r['movidas'] == 0, r
+    assert len(os.listdir(os.path.join(arquivo, '2026-09'))) == 2
+    assert not os.path.exists(os.path.join(ponte, PONTE[0])), 'devia sair da ponte'
+    print('ok  reimportar a mesma foto nao duplica, e limpa a ponte')
+
+
+@com_mundo
+def teste_mesmo_nome_com_conteudo_diferente_guarda_as_duas(ponte, arquivo):
+    af.importar(ponte, arquivo)
+    with open(os.path.join(ponte, PONTE[0]), 'wb') as f:
+        f.write(b'OUTRA foto, maior')      # mesmo nome, conteúdo diferente
+    r = af.importar(ponte, arquivo)
+    assert r['movidas'] == 1, r
+    guardadas = sorted(os.listdir(os.path.join(arquivo, '2026-09')))
+    assert len(guardadas) == 3, guardadas
+    assert any('(2)' in g for g in guardadas), guardadas
+    print('ok  duas fotos de mesmo nome e conteudo diferente: guarda as duas')
+
+
+@com_mundo
+def teste_busca_no_arquivo_e_na_ponte(ponte, arquivo):
+    # Antes de importar: a foto está só na ponte, e tem de aparecer.
+    achadas = af.fotos_de('14', '2026-09-02', 'Entrada', arquivo, ponte)
+    assert len(achadas) == 1, achadas
+    assert achadas[0][0].startswith(ponte), achadas
+
+    af.importar(ponte, arquivo)
+
+    # Depois de importar: aparece, agora vindo do HD.
+    achadas = af.fotos_de('14', '2026-09-02', 'Entrada', arquivo, ponte)
+    assert len(achadas) == 1 and '2026-09' in achadas[0][0], achadas
+    # A loja 14 não pode trazer a 1 nem a 4, e o tipo tem de bater:
+    assert af.fotos_de('1', '2026-09-02', 'Entrada', arquivo, ponte) == []
+    assert len(af.fotos_de('14', '2026-09-02', 'Saida', arquivo, ponte)) == 1
+    assert af.fotos_de('14', '2026-09-01', 'Entrada', arquivo, ponte) == []
+    print('ok  busca acha no HD e na ponte, sem confundir loja, dia nem tipo')
+
+
+@com_mundo
+def teste_resumo_por_mes(ponte, arquivo):
+    af.importar(ponte, arquivo)
+    r = af.resumo(arquivo)
+    assert r['fotos'] == 3, r
+    assert sorted(r['por_mes']) == ['2026-08', '2026-09'], r['por_mes']
+    assert r['por_mes']['2026-09']['fotos'] == 2
+    assert r['bytes'] > 0
+    print('ok  resumo diz quantas fotos e quanto espaco, por mes')
+
+
+@com_mundo
+def teste_apagar_do_arquivo(ponte, arquivo):
+    af.importar(ponte, arquivo)
+    achadas = af.fotos_de('14', '2026-09-02', 'Entrada', arquivo, ponte)
+    n, erros = af.apagar([c for c, _ in achadas])
+    assert n == 1 and erros == [], (n, erros)
+    assert af.fotos_de('14', '2026-09-02', 'Entrada', arquivo, ponte) == []
+    # Apagar o que não existe devolve erro, não explode:
+    n, erros = af.apagar(['C:/nao/existe/foto.jpg'])
+    assert n == 0 and len(erros) == 1
+    print('ok  apaga do arquivo e relata o que nao conseguiu')
+
+
+def teste_hd_ausente_nao_mente():
+    base, ponte, _ = montar()
+    try:
+        ok, motivo = af.destino_disponivel('Z:\\nao_existe\\Fotos')
+        assert not ok and 'Z:' in motivo, motivo
+        r = af.importar(ponte, 'Z:\\nao_existe\\Fotos')
+        assert r['movidas'] == 0 and r['erros'], r
+        # E NADA saiu da ponte: sem destino, não se mexe na origem.
+        assert len(os.listdir(ponte)) == len(PONTE)
+        print('ok  sem o HD, nada e movido e ele avisa')
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+if __name__ == '__main__':
+    teste_importa_em_pastas_por_mes()
+    teste_a_ponte_fica_vazia_das_fotos()
+    teste_nome_torto_e_devolvido_para_ele_ver()
+    teste_importar_duas_vezes_nao_duplica()
+    teste_mesmo_nome_com_conteudo_diferente_guarda_as_duas()
+    teste_busca_no_arquivo_e_na_ponte()
+    teste_resumo_por_mes()
+    teste_apagar_do_arquivo()
+    teste_hd_ausente_nao_mente()
+    print('\nTODOS OS TESTES PASSARAM')

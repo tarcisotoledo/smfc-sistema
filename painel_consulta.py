@@ -1,60 +1,73 @@
-"""Painel de auditoria: as fotos que as lojas mandaram, por loja e por dia.
+"""Painel de auditoria das fotos de carga — roda no PC dele.
 
-## Os dois defeitos corrigidos em 01/09/2026
+## O desenho, na decisão dele (02/09/2026)
 
-1. **A busca da loja casava por pedaço de texto.** `"LOJA2" in nome` é
-   verdadeiro para `LOJA20`, `LOJA22`, `LOJA23` e `LOJA24`. Medido nas 1.528
-   fotos: procurar a loja 2 (que tem **4** fotos) devolvia **432**; procurar a
-   loja 1 devolvia 603 fotos das lojas 10, 12, 14, 16, 18 e 19. Agora o número é
-   comparado inteiro, e não como trecho.
+    "o github não ficasse com as imagens isso seria o trabalho do meu HD ele
+     funcionaria como intermediário entre o celular e o meu pc"
 
-2. **A FAXINA não apagava nada** — o botão só escrevia "Faxina concluída". Isso é
-   pior do que não existir: dava para acreditar que o disco havia sido limpo.
-   Agora ela conta o que vai apagar, pede confirmação e apaga de verdade **só a
-   cópia local** (o GitHub continua com tudo).
+    celular  ->  GitHub (corredor)  ->  este Painel  ->  E:\\Arquivo_WorldFree\\Fotos_Cargas
+                                                              (o arquivo de verdade)
 
-## Sobre a hora das fotos antigas
+A aba **ARQUIVO** puxa o que chegou, move para o HD por mês e **esvazia a pasta do
+repositório** com um commit — a ponte fica limpa. A busca olha o HD *e* a ponte,
+porque entre uma importação e outra a foto do dia está lá, e foto invisível é o
+mesmo que foto perdida.
 
-Até 01/09/2026 o app do celular nomeava os arquivos com a hora do servidor, que é
-UTC — três horas à frente do Brasil. A carga da noite (21h em diante) caía com a
-data do dia seguinte no nome. Por isso a busca inclui, para os arquivos anteriores
-ao corte, as três primeiras horas do dia seguinte: é lá que a foto da noite
-anterior foi arquivada. Ver a explicação em `app_celular.py`.
+**O que este Painel NÃO resolve:** o histórico do git guarda para sempre o que já
+passou por ele (191 MB medidos em 02/09/2026). Esvaziar a pasta limpa o presente,
+não o passado — isso é uma limpeza destrutiva à parte, que só ele pode mandar
+fazer.
+
+As regras (ler o nome, achar por loja/dia/tipo, mover, apagar) moram em
+`foto_carga.py` e `arquivo_fotos.py`, sem Streamlit, e têm teste:
+`teste_foto_carga.py` e `teste_arquivo_fotos.py`.
 """
 import os
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import streamlit as st
 
-import foto_carga as fc
+import arquivo_fotos as af
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PASTA_FOTOS = os.path.join(BASE_DIR, "fotos_recebidas")
+PASTA_PONTE = os.path.join(BASE_DIR, "fotos_recebidas")
 
-DIAS_DA_FAXINA = 90
-
-st.set_page_config(page_title="Painel de Auditoria SMFC", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="Fotos de Carga", page_icon="🔍", layout="wide")
 
 st.markdown("""
     <style>
-    html, body, [class*="ViewContainer"] { font-size: 22px !important; }
+    html, body, [class*="ViewContainer"] { font-size: 20px !important; }
     .stButton>button {
-        height: 4em;
-        width: 100%;
-        font-size: 24px !important;
-        font-weight: bold;
-        color: white !important;
-        background-color: #007bff !important;
-        border-radius: 10px;
+        height: 3.4em; width: 100%; font-size: 22px !important;
+        font-weight: bold; color: white !important;
+        background-color: #007bff !important; border-radius: 10px;
     }
-    .stTextInput>div>div>input { font-size: 22px !important; height: 3em; }
+    .stTextInput>div>div>input { font-size: 22px !important; height: 2.6em; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🔍 PAINEL DE AUDITORIA SMFC")
+st.title("🔍 FOTOS DE CARGA")
 
 
+def rodar_git(*argumentos, minutos=5):
+    """Roda git na pasta do repositório. Devolve (ok, saída)."""
+    try:
+        r = subprocess.run(('git',) + argumentos, cwd=BASE_DIR,
+                           capture_output=True, text=True, timeout=minutos * 60)
+        return r.returncode == 0, (r.stdout + r.stderr).strip()
+    except Exception as e:
+        return False, str(e)
+
+
+def fotos_na_ponte():
+    if not os.path.isdir(PASTA_PONTE):
+        return []
+    return [n for n in os.listdir(PASTA_PONTE)
+            if os.path.isfile(os.path.join(PASTA_PONTE, n))]
+
+
+# ------------------------------------------------------------------- a busca
 def buscar_e_exibir(tipo):
     col1, col2 = st.columns(2)
     with col1:
@@ -62,33 +75,38 @@ def buscar_e_exibir(tipo):
     with col2:
         data_sel = st.date_input("Data da Carga:", datetime.now(), key="data_%s" % tipo)
 
-    if not st.button("CLIQUE AQUI PARA BUSCAR %s 🔍" % tipo.upper(), key="btn_%s" % tipo):
+    if not st.button("BUSCAR %s 🔍" % tipo.upper(), key="btn_%s" % tipo):
         return
 
     if not str(loja).strip().isdigit():
         return st.warning("Digite o número da loja — só números, por exemplo 20.")
 
     data_str = data_sel.strftime("%Y-%m-%d")
-    achadas, do_fuso = fc.fotos_de(PASTA_FOTOS, loja, data_str, tipo)
+    achadas = af.fotos_de(loja, data_str, tipo, pasta_ponte=PASTA_PONTE)
 
-    if not achadas and not do_fuso:
+    if not achadas:
         return st.warning("⚠️ Nenhuma foto de %s da Loja %s em %s."
                           % (tipo, loja, data_sel.strftime('%d/%m/%Y')))
 
-    st.success("✅ %d foto(s) encontrada(s)." % (len(achadas) + len(do_fuso)))
-    if do_fuso:
-        st.caption("%d delas foram tiradas à noite e ficaram gravadas com a data "
-                   "do dia seguinte (fuso do servidor, corrigido em 01/09)."
-                   % len(do_fuso))
-
-    for nome in achadas + do_fuso:
-        caminho = os.path.join(PASTA_FOTOS, nome)
+    st.success("✅ %d foto(s)." % len(achadas))
+    for caminho, nome in achadas:
+        onde = "ponte (ainda não importada)" if caminho.startswith(PASTA_PONTE) \
+               else os.path.basename(os.path.dirname(caminho))
         tamanho = os.path.getsize(caminho) // 1024
-        st.image(caminho, caption="%s  ·  %d KB" % (nome, tamanho),
-                 use_container_width=True)
+        st.image(caminho, use_container_width=True,
+                 caption="%s  ·  %d KB  ·  %s" % (nome, tamanho, onde))
+        # Exclusão pontual, que ele pediu: "um programa para consulta e exclusão".
+        if st.checkbox("apagar esta foto do arquivo", key="del_%s" % caminho):
+            if st.button("APAGAR AGORA — %s" % nome, key="btndel_%s" % caminho):
+                n, erros = af.apagar([caminho])
+                if n:
+                    st.success("Apagada. Ela sai do HD e não volta.")
+                if erros:
+                    st.error("; ".join(erros))
 
 
-aba_saida, aba_entrada, aba_faxina = st.tabs(["📤 SAÍDA", "📥 ENTRADA", "🧹 FAXINA"])
+aba_saida, aba_entrada, aba_arquivo = st.tabs(
+    ["📤 SAÍDA", "📥 ENTRADA", "🗄️ ARQUIVO (importar do GitHub)"])
 
 with aba_saida:
     buscar_e_exibir("Saida")
@@ -96,87 +114,89 @@ with aba_saida:
 with aba_entrada:
     buscar_e_exibir("Entrada")
 
-with aba_faxina:
-    st.subheader("🧹 Limpeza da cópia local")
-    st.write("Apaga da **sua máquina** as fotos com mais de %d dias. "
-             "O GitHub continua com todas — isto é só o espaço do disco daqui."
-             % DIAS_DA_FAXINA)
+# ----------------------------------------------------------------- o arquivo
+with aba_arquivo:
+    st.subheader("🗄️ O arquivo mora no HD; o GitHub é só o corredor")
 
-    # Depois da faxina, o git passa a ver aquelas fotos como APAGADAS no diretório
-    # de trabalho. Elas continuam no GitHub, mas um "commit de tudo" as levaria
-    # embora de lá também. Isso apareceu de verdade em 02/09/2026, quando a
-    # faxina tirou 225 fotos do disco - o aviso e o botão de restaurar existem
-    # para que isso nunca seja uma surpresa.
-    def _apagadas_no_git():
-        try:
-            saida = subprocess.run(
-                ['git', 'status', '--porcelain', 'fotos_recebidas'],
-                cwd=BASE_DIR, capture_output=True, text=True, timeout=30).stdout
-            return [l[3:].strip() for l in saida.splitlines() if l.startswith(' D')]
-        except Exception:
-            return []
-
-    apagadas = _apagadas_no_git()
-    if apagadas:
-        st.warning(
-            "⚠️ **%d foto(s) já foram apagadas do disco** por uma faxina anterior. "
-            "Elas continuam no GitHub.\n\n"
-            "Enquanto estiverem assim, **não faça `git add .` nem commit de tudo** "
-            "nesta pasta: isso apagaria essas fotos do GitHub também. O envio das "
-            "fotos novas pelo celular não é afetado." % len(apagadas))
-        if st.button("🔄 TRAZER AS APAGADAS DE VOLTA DO GITHUB"):
-            try:
-                r = subprocess.run(['git', 'checkout', '--', 'fotos_recebidas'],
-                                   cwd=BASE_DIR, capture_output=True, text=True,
-                                   timeout=180)
-                if r.returncode == 0:
-                    st.success("Pronto: as %d voltaram para o disco." % len(apagadas))
-                else:
-                    st.error("O git recusou: %s" % (r.stderr or r.stdout)[:300])
-            except Exception as e:
-                st.error("Não consegui restaurar: %s" % e)
-
-    if not os.path.isdir(PASTA_FOTOS):
-        st.info("A pasta de fotos ainda não existe nesta máquina.")
+    ok_hd, motivo_hd = af.destino_disponivel()
+    if ok_hd:
+        st.caption("Arquivo em **%s**" % af.PASTA_ARQUIVO)
     else:
-        corte = datetime.now() - timedelta(days=DIAS_DA_FAXINA)
-        velhas = []
-        for nome in os.listdir(PASTA_FOTOS):
-            partes = fc.partes_do_nome(nome)
-            if not partes:
-                continue
-            try:
-                quando = datetime.strptime(partes[0], "%Y-%m-%d")
-            except ValueError:
-                continue
-            if quando < corte:
-                velhas.append(nome)
+        st.error("⚠️ %s — sem ele nada pode ser importado." % motivo_hd)
 
-        espaco = sum(os.path.getsize(os.path.join(PASTA_FOTOS, n)) for n in velhas)
-        if not velhas:
-            st.success("Nada para apagar: nenhuma foto tem mais de %d dias."
-                       % DIAS_DA_FAXINA)
-        else:
-            st.warning("**%d foto(s)** com mais de %d dias, ocupando **%.1f MB**."
-                       % (len(velhas), DIAS_DA_FAXINA, espaco / 1048576))
-            # Apagar não tem volta daqui: confirma marcando, e não num clique só.
-            confirmou = st.checkbox("Sim, apagar essas fotos da cópia local")
-            if st.button("APAGAR AGORA"):
-                if not confirmou:
-                    st.warning("Marque a confirmação acima antes de apagar.")
+    r = af.resumo()
+    na_ponte = fotos_na_ponte()
+    col1, col2 = st.columns(2)
+    col1.metric("No HD (arquivo)", "%d fotos" % r['fotos'],
+                "%.0f MB" % (r['bytes'] / 1048576) if r['fotos'] else None)
+    col2.metric("Na ponte (GitHub)", "%d arquivo(s)" % len(na_ponte))
+
+    st.write("")
+    if st.button("📥 IMPORTAR: trazer do GitHub e guardar no HD", disabled=not ok_hd):
+        registro = st.container()
+
+        # 1) As fotos que uma faxina antiga apagou do disco voltam ANTES de tudo:
+        #    elas nunca foram para o HD, e commitar a exclusão as tiraria da
+        #    única cópia que existe. Foi o caso das 225 de 02/09/2026.
+        with st.spinner("Recuperando o que faltava no disco..."):
+            ok, saida = rodar_git('checkout', '--', 'fotos_recebidas')
+            if not ok:
+                registro.warning("git checkout: %s" % saida[:300])
+
+        with st.spinner("Buscando fotos novas no GitHub..."):
+            ok, saida = rodar_git('pull', 'origin', 'main')
+            registro.write("**git pull:** %s" % (saida[:300] or "sem novidades"))
+            if not ok:
+                registro.error("Não consegui puxar do GitHub. Nada foi movido.")
+                st.stop()
+
+        with st.spinner("Movendo para o HD..."):
+            res = af.importar(PASTA_PONTE)
+
+        registro.success("**%d foto(s) movidas para o HD.**" % res['movidas'])
+        if res['ja_existiam']:
+            registro.info("%d já estavam no arquivo (reenvio do celular)."
+                          % res['ja_existiam'])
+        if res['ignoradas']:
+            registro.warning(
+                "%d arquivo(s) com nome fora do padrão ficaram na ponte, de "
+                "propósito — apagar o que não se entende é a forma mais rápida "
+                "de perder prova:\n\n%s"
+                % (len(res['ignoradas']), ", ".join(res['ignoradas'][:8])))
+        if res['erros']:
+            registro.error("Erros:\n\n" + "\n".join(res['erros'][:8]))
+
+        # 2) Esvazia a ponte no GitHub - só o que de fato foi para o HD.
+        if res['movidas'] or res['ja_existiam']:
+            with st.spinner("Esvaziando a ponte no GitHub..."):
+                ok, saida = rodar_git('add', '-A', 'fotos_recebidas')
+                if ok:
+                    ok, saida = rodar_git(
+                        'commit', '-m',
+                        'Ponte esvaziada: %d foto(s) arquivadas no HD' % res['movidas'])
+                if ok or 'nothing to commit' in saida:
+                    ok, saida = rodar_git('push', 'origin', 'master:main')
+                if ok:
+                    registro.success("Ponte esvaziada no GitHub.")
                 else:
-                    # `removidas`, e não `apagadas`: este nome já é a lista das
-                    # que o git vê como apagadas, lá em cima.
-                    removidas, erros = 0, []
-                    for nome in velhas:
-                        try:
-                            os.remove(os.path.join(PASTA_FOTOS, nome))
-                            removidas += 1
-                        except Exception as e:
-                            erros.append("%s (%s)" % (nome, e))
-                    st.success("%d foto(s) apagadas da cópia local. Elas continuam "
-                               "no GitHub — se precisar delas aqui, use o botão de "
-                               "trazer de volta, no alto desta aba." % removidas)
-                    if erros:
-                        st.error("Não consegui apagar %d: %s"
-                                 % (len(erros), "; ".join(erros[:5])))
+                    registro.error(
+                        "As fotos ESTÃO salvas no HD, mas não consegui esvaziar a "
+                        "ponte:\n\n%s\n\nNada foi perdido: na próxima importação "
+                        "ele tenta de novo." % saida[:400])
+        st.rerun()
+
+    if r['por_mes']:
+        st.write("")
+        st.write("**O que há no HD, por mês:**")
+        st.table([{'Mês': mes, 'Fotos': d['fotos'],
+                   'Espaço': "%.0f MB" % (d['bytes'] / 1048576)}
+                  for mes, d in sorted(r['por_mes'].items(), reverse=True)])
+
+    st.write("")
+    st.info(
+        "**O histórico do git.** Esvaziar a pasta limpa o presente, não o "
+        "passado: o que já passou pela ponte continua guardado no histórico do "
+        "GitHub (191 MB medidos em 02/09/2026, e cada foto nova soma). Para o "
+        "repositório encolher de verdade é preciso uma limpeza destrutiva do "
+        "histórico, ou uma ponte separada do código — decisão sua, não faço "
+        "sozinho.")
