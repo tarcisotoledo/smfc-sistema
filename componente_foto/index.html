@@ -35,14 +35,33 @@
   }
   #botao:active { background: #a8221a; }
   input[type=file] { display: none; }
+  /* O link da galeria e discreto de proposito: o caminho normal e a camera. */
+  #galeria_link {
+    display: block; margin-top: 12px; text-align: center;
+    font-size: 1.05rem; color: #64748b; text-decoration: underline;
+    cursor: pointer; user-select: none;
+  }
   #estado { margin-top: 10px; font-size: 1.15rem; font-weight: 700; color: #334155; }
   #lista { margin-top: 6px; font-size: 1rem; color: #475569; }
   .erro { color: #b91c1c; }
 </style>
 </head>
 <body>
+  <!--
+    capture="environment" é o que faz o celular ABRIR A CÂMERA DE TRÁS direto,
+    sem passar pelo seletor "Câmera ou Galeria". Sem ele, o motorista tocava em
+    TIRAR FOTO e caía na galeria - foi o que ele reclamou em 02/09/2026.
+
+    E aqui NÃO tem `multiple`: alguns navegadores ignoram o `capture` quando o
+    input aceita vários arquivos, e voltariam a abrir a galeria. Quem precisa de
+    várias usa o link da galeria, embaixo.
+  -->
   <label id="botao" for="arquivo">📸&nbsp;&nbsp;TIRAR FOTO</label>
-  <input id="arquivo" type="file" accept="image/*" multiple>
+  <input id="arquivo" type="file" accept="image/*" capture="environment">
+
+  <label id="galeria_link" for="galeria">🖼️ escolher da galeria</label>
+  <input id="galeria" type="file" accept="image/*" multiple>
+
   <div id="estado"></div>
   <div id="lista"></div>
 
@@ -112,7 +131,7 @@ async function reduzir(arquivo) {
   };
 }
 
-document.getElementById("arquivo").addEventListener("change", async (e) => {
+async function aoEscolher(e) {
   const arquivos = Array.from(e.target.files || []);
   if (!arquivos.length) return;
 
@@ -160,7 +179,10 @@ document.getElementById("arquivo").addEventListener("change", async (e) => {
     estado.textContent = "Não consegui preparar nenhuma foto.";
   }
   ajustarAltura();
-});
+}
+
+document.getElementById("arquivo").addEventListener("change", aoEscolher);
+document.getElementById("galeria").addEventListener("change", aoEscolher);
 
 window.addEventListener("load", () => {
   avisar("streamlit:componentReady", {apiVersion: 1});

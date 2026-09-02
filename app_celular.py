@@ -169,9 +169,10 @@ if valor and valor.get('fotos') and \
         except Exception:
             st.error("Uma das fotos chegou quebrada do celular. Tente tirar de novo.")
 
-with st.expander("📶 O botão acima não funcionou? Toque aqui"):
-    st.caption("Esta é a foto rápida: bem menor, sobe até com sinal fraco. A "
-               "nitidez é pior — use só quando a de cima não der conta.")
+with st.expander("📶 Último recurso: foto pequena (só se a câmera não abrir)"):
+    st.caption("Esta é a tela pequena de antes, com a foto sem nitidez. Ela sobe "
+               "até com sinal muito fraco — use apenas se o botão de cima não "
+               "abrir a câmera.")
     # Dentro do expander fechado de propósito: o `camera_input` pede permissão de
     # câmera e liga o vídeo assim que aparece na tela.
     rapida = st.camera_input("Foto rápida")
