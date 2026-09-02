@@ -194,10 +194,38 @@ tipo_fluxo = st.radio("Operação:", ["Entrada", "Saída"], horizontal=True)
 # file_uploader, e NÃO camera_input: no celular ele abre a câmera do aparelho,
 # que fotografa na resolução de verdade. E aceita várias de uma vez - carga
 # raramente é uma foto só.
-fotos = st.file_uploader(
+# DOIS CAMINHOS, porque eles custam coisas diferentes - e um deles tem de
+# funcionar SEMPRE.
+#
+# Medido em 02/09/2026, o pior jeito de descobrir: depois de eu trocar o
+# `camera_input` pelo `file_uploader`, ZERO fotos chegaram ao repositório (a
+# última foi 01/09 12:12, antes da minha versão). O motorista tentou e a tela
+# ficou em "CONNECTING" com a foto marcada de vermelho.
+#
+# A causa é minha: a redução para 2048 px acontece no SERVIDOR, depois do
+# upload. O celular passou a subir os 3,2 MB inteiros da câmera, quando antes
+# subia 140 KB. Em dado móvel, dentro de um caminhão, isso não sobe.
+#
+# Então: a foto nítida continua sendo o caminho principal, e a rápida existe
+# para quando o sinal não deixa. Quem escolhe é quem está lá, sabendo o preço.
+fotos = []
+
+nitidas = st.file_uploader(
     "Toque no botão e escolha **Câmera** (ou a galeria, se a foto já está lá):",
     type=["jpg", "jpeg", "png", "heic", "heif"],
     accept_multiple_files=True)
+if nitidas:
+    fotos.extend(nitidas)
+
+with st.expander("📶 A foto não sobe? Toque aqui para a FOTO RÁPIDA"):
+    st.caption("A foto rápida é bem menor e sobe com sinal fraco. A nitidez é "
+               "pior — use quando a de cima não conseguir subir.")
+    # Dentro do expander de propósito: o `camera_input` pede permissão de
+    # câmera e liga o vídeo assim que aparece na tela. Fechado, ele não incomoda
+    # quem não precisa dele.
+    rapida = st.camera_input("Foto rápida")
+    if rapida:
+        fotos.append(rapida)
 
 if fotos:
     st.caption("%d foto(s) prontas para enviar." % len(fotos))
