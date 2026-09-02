@@ -240,6 +240,9 @@ if fotos:
                 st.write("• **%s** — %s" % (nome_original, recado))
             st.info("As que falharam continuam no celular: dá para tentar de novo.")
         else:
-            st.balloons()
-            time.sleep(2)
+            # Sem balões: ele pediu em 02/09/2026, e com razão - 20 cargas por
+            # dia dariam 20 animações para esperar. A pausa curta existe só para
+            # dar tempo de LER o ✅ antes da tela limpar para a próxima foto.
+            st.success("Pronto. Pode tirar a próxima.")
+            time.sleep(1.5)
             st.rerun()
