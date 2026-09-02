@@ -73,13 +73,11 @@ LOJAS = (
 )
 
 
-# As que mais recebem carga, medidas nas 1.528 fotos de 17/05 a 01/09/2026:
-# estas seis são 62% das fotos. Ficam no alto da tela para o motorista resolver a
-# parada com um toque, sem rolar - e a lista inteira continua embaixo.
-#
-# Se a rota mudar, é aqui que se mexe. Para remedir: contar `_LOJAnn` nos nomes
-# dos arquivos da pasta fotos_recebidas.
-MAIS_USADAS = (23, 9, 18, 22, 19, 3)
+# NAO existe mais lista de botoes na tela: o motorista pediu de volta o campo de
+# digitar (02/09/2026), porque nao enxerga bem e o teclado ele ja sabe de cor.
+# A lista LOJAS ficou por um motivo melhor - dar o NOME da loja como confirmacao
+# do numero digitado. As que mais recebem carga, se um dia servir: 23, 9, 18, 22,
+# 19 e 3, que somam 62% das 1.528 fotos medidas de 17/05 a 01/09/2026.
 
 
 def nome_da_loja(numero):

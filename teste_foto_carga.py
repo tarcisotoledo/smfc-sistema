@@ -152,8 +152,12 @@ def teste_lista_de_lojas():
     for numero, _ in fc.LOJAS:
         nome = fc.nome_do_arquivo(quando, 'Entrada', numero)
         assert fc.partes_do_nome(nome)[3] == str(numero), nome
+    # O nome e a CONFIRMACAO do numero digitado, para o motorista que nao
+    # enxerga bem conferir lendo em vez de reler o digito.
     assert 'PARK JACAREPAGUA' in fc.nome_da_loja(20)
+    assert 'OUTLET SHOPPING' in fc.nome_da_loja('22')
     assert fc.nome_da_loja(99) == 'Loja 99'      # fora da lista, nao inventa nome
+    assert fc.nome_da_loja(' 2 ') == '2 · CARREFOUR GALERIA'
     print('ok  as 21 lojas dos botoes viram nome de arquivo que se le de volta')
 
 

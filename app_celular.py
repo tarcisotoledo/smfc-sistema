@@ -79,8 +79,24 @@ st.markdown("""
     }
     /* A linha "200MB per file • JPG, PNG..." é do Streamlit e vem em inglês. */
     [data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }
-    /* O radio Entrada/Saída maior, que é escolha de dedo dentro do caminhão. */
-    [data-testid="stRadio"] label p { font-size: 1.15rem !important; }
+
+    /* TUDO MAIOR: quem usa isto é o motorista, que não enxerga bem — ele
+       mesmo pediu em 02/09/2026. Não é preferência de estilo, é o que decide
+       se ele consegue trabalhar sem ajuda. */
+    [data-testid="stRadio"] label p { font-size: 1.4rem !important; }
+    /* O campo do número da loja: fonte grande e centralizada, para ele
+       conferir o que digitou sem aproximar o celular do olho. */
+    [data-testid="stTextInput"] input {
+        font-size: 2.2rem !important;
+        height: 3.2em !important;
+        text-align: center !important;
+        font-weight: 800 !important;
+        letter-spacing: 2px !important;
+    }
+    [data-testid="stTextInput"] label p { font-size: 1.3rem !important; }
+    /* O aviso da loja escolhida, que é a confirmação que evita foto na loja
+       errada. */
+    [data-testid="stAlert"] p { font-size: 1.5rem !important; font-weight: 700 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -135,42 +151,36 @@ if 'numero_loja' not in st.session_state:
         st.session_state.numero_loja = str(da_url).strip()
 
 if 'numero_loja' not in st.session_state:
-    # BOTÃO, e não campo de digitar: quem usa isto é o motorista, que passa em
-    # várias lojas no mesmo dia. Um toque por parada, sem teclado - e sem o
-    # "LOJAL9" que já aconteceu cinco vezes e sumiu da busca do Painel.
-    st.write("### Em qual loja você está?")
-
-    # Uma coluna só, e não duas: no celular o Streamlit empilha as colunas, e a
-    # ordem sai quebrada (2, 4, 8, 10... e depois 3, 6, 9...). Testado em tela de
-    # 375 px antes de publicar.
+    # DIGITAR o número, como era antes - o motorista pediu de volta em
+    # 02/09/2026: ele não enxerga bem, e a lista de 21 botões era pior para ele
+    # do que o teclado, que ele já sabia de cor.
     #
-    # As mais usadas primeiro, porque 21 botões em fila são quatro telas de
-    # rolagem para quem está com a mercadoria na mão. Medido: seis lojas são 62%
-    # das cargas.
-    def botao_da_loja(numero, nome, prefixo=""):
-        if st.button("%s%d · %s" % (prefixo, numero, nome),
-                     key="loja_%s%d" % (prefixo and "top", numero),
-                     use_container_width=True):
-            st.session_state.numero_loja = str(numero)
+    # O que ficou da tentativa dos botões: o NOME da loja aparece grande, como
+    # confirmação. Digitar sozinho foi o que gerou cinco arquivos "LOJAL9" e
+    # "LOJAL19", perdidos para sempre na busca do Painel; agora só entra número,
+    # e ele confere lendo o nome em vez de reler o dígito.
+    st.write("## Qual é o número da loja?")
+    digitado = st.text_input("Digite e confira o nome que aparecer:",
+                             key="loja_digitada", max_chars=3)
+
+    numero = digitado.strip()
+    if numero and not numero.isdigit():
+        st.error("### Só números, por favor — por exemplo **20**.")
+    elif numero:
+        # A confirmação pelo NOME: se ele digitou 22 querendo 2, ele lê
+        # "OUTLET SHOPPING" e percebe ANTES de fotografar.
+        nome = fc.nome_da_loja(numero)
+        if nome.startswith("Loja "):
+            st.warning("### %s\nEste número não está na minha lista." % nome)
+        else:
+            st.success("### %s" % nome)
+
+    if st.button("CONFIRMAR ➡️", use_container_width=True, type="primary"):
+        if numero.isdigit():
+            st.session_state.numero_loja = numero
             st.rerun()
-
-    por_numero = dict(fc.LOJAS)
-    for numero in fc.MAIS_USADAS:
-        if numero in por_numero:
-            botao_da_loja(numero, por_numero[numero], prefixo="⭐ ")
-
-    with st.expander("Todas as lojas"):
-        for numero, nome in fc.LOJAS:
-            botao_da_loja(numero, nome)
-
-    with st.expander("Outro lugar (digitar o número)"):
-        digitado = st.text_input("Número", key="loja_digitada")
-        if st.button("Confirmar ➡️"):
-            if digitado.strip().isdigit():
-                st.session_state.numero_loja = digitado.strip()
-                st.rerun()
-            else:
-                st.warning("Digite só o número, por exemplo 20.")
+        else:
+            st.error("Digite o número da loja antes de continuar.")
     st.stop()
 
 loja = st.session_state.numero_loja
