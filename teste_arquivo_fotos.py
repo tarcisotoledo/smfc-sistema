@@ -3,6 +3,7 @@
 
     python teste_arquivo_fotos.py
 """
+import io
 import os
 import shutil
 import sys
@@ -154,6 +155,110 @@ def teste_hd_ausente_nao_mente():
         shutil.rmtree(base, ignore_errors=True)
 
 
+
+
+def teste_importar_do_whatsapp():
+    """Fotos soltas, com nome do WhatsApp, viram nome do sistema e vao ao HD."""
+    import tempfile as _tmp
+    from datetime import datetime
+    from PIL import Image
+
+    base = _tmp.mkdtemp(prefix='wf_zap_')
+    downloads = os.path.join(base, 'Downloads')
+    arquivo = os.path.join(base, 'HD')
+    os.makedirs(downloads)
+    # Como o WhatsApp baixa: nome proprio, e uma foto grande de verdade.
+    nomes_zap = ['IMG-20260902-WA0007.jpg', 'IMG-20260902-WA0008.jpg']
+    for n in nomes_zap:
+        Image.new('RGB', (3000, 4000), (20, 90, 40)).save(
+            os.path.join(downloads, n), format='JPEG', quality=92)
+    # E um arquivo que JA esta no padrao: nao e do WhatsApp, nao entra.
+    open(os.path.join(downloads, '2026-09-02_10-00-00-01_ENTRADA_LOJA14.jpg'), 'wb').close()
+
+    try:
+        soltas = af.fotos_soltas(downloads)
+        assert sorted(os.path.basename(c) for c in soltas) == nomes_zap, soltas
+
+        quando = datetime(2026, 9, 2, 12, 0, 0)
+        r = af.importar_do_whatsapp(soltas, '14', 'Saida', quando=quando,
+                                    pasta_arquivo=arquivo)
+        assert r['erros'] == [], r['erros']
+        assert len(r['arquivadas']) == 2, r
+
+        guardadas = sorted(os.listdir(os.path.join(arquivo, '2026-09')))
+        assert all('_SAIDA_LOJA14.jpg' in g for g in guardadas), guardadas
+        # O nome gerado tem de ser legivel pela mesma regra da busca:
+        for g in guardadas:
+            partes = af.partes_do_nome(g)
+            assert partes and partes[3] == '14' and partes[2] == 'SAIDA', g
+        # E a foto foi reduzida, como as do app:
+        with Image.open(os.path.join(arquivo, '2026-09', guardadas[0])) as im:
+            assert max(im.size) == 2048, im.size
+        # A origem NAO foi apagada (mover=False e o padrao):
+        assert len(af.fotos_soltas(downloads)) == 2
+
+        # A busca acha:
+        achadas = af.fotos_de('14', '2026-09-02', 'Saida', pasta_arquivo=arquivo)
+        assert len(achadas) == 2, achadas
+        # E a 1 nao vem de brinde:
+        assert af.fotos_de('1', '2026-09-02', 'Saida', pasta_arquivo=arquivo) == []
+
+        # O manifesto guarda de onde cada arquivo veio:
+        with io.open(os.path.join(arquivo, af.MANIFESTO), encoding='utf-8-sig') as f:
+            conteudo = f.read()
+        assert 'IMG-20260902-WA0007.jpg' in conteudo, conteudo
+        print('ok  foto do WhatsApp vira nome do sistema, reduzida, com manifesto')
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def teste_whatsapp_com_nome_e_bytes():
+    """O caminho do Painel: fotos escolhidas na janela, sem passar pelo disco."""
+    import tempfile as _tmp
+    from datetime import datetime
+    from PIL import Image
+
+    base = _tmp.mkdtemp(prefix='wf_zap3_')
+    try:
+        def foto(cor):
+            buf = io.BytesIO()
+            Image.new('RGB', (3000, 4000), cor).save(buf, format='JPEG', quality=90)
+            return buf.getvalue()
+
+        lote = [('IMG-20260902-WA0021.jpg', foto((10, 80, 30))),
+                ('IMG-20260902-WA0022.jpg', foto((80, 10, 30)))]
+        # A hora que ELE informou tem de virar a hora do nome: 11:50 na loja 19.
+        quando = datetime(2026, 9, 2, 11, 50)
+        r = af.importar_do_whatsapp(lote, '19', 'Entrada', quando=quando,
+                                    pasta_arquivo=base)
+        assert r['erros'] == [] and len(r['arquivadas']) == 2, r
+
+        guardadas = sorted(os.listdir(os.path.join(base, '2026-09')))
+        assert all(g.startswith('2026-09-02_11-50-') for g in guardadas), guardadas
+        assert all('_ENTRADA_LOJA19.jpg' in g for g in guardadas), guardadas
+        # Dois arquivos, dois nomes: o segundo NAO pode sobrescrever o primeiro.
+        assert len(guardadas) == 2, guardadas
+        # E a busca do Painel acha pelo dia:
+        assert len(af.fotos_de('19', '2026-09-02', 'Entrada',
+                               pasta_arquivo=base)) == 2
+        with Image.open(os.path.join(base, '2026-09', guardadas[0])) as im:
+            assert max(im.size) == 2048, im.size
+        print('ok  foto escolhida na janela (nome+bytes) arquiva na hora informada')
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def teste_whatsapp_recusa_loja_invalida():
+    import tempfile as _tmp
+    base = _tmp.mkdtemp(prefix='wf_zap2_')
+    try:
+        r = af.importar_do_whatsapp([], 'L9', 'Entrada', pasta_arquivo=base)
+        assert r['arquivadas'] == [] and r['erros'], r
+        print('ok  loja com letra e recusada - e o "LOJAL9" nao se repete')
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
 if __name__ == '__main__':
     teste_importa_em_pastas_por_mes()
     teste_a_ponte_fica_vazia_das_fotos()
@@ -163,5 +268,8 @@ if __name__ == '__main__':
     teste_busca_no_arquivo_e_na_ponte()
     teste_resumo_por_mes()
     teste_apagar_do_arquivo()
+    teste_importar_do_whatsapp()
+    teste_whatsapp_com_nome_e_bytes()
+    teste_whatsapp_recusa_loja_invalida()
     teste_hd_ausente_nao_mente()
     print('\nTODOS OS TESTES PASSARAM')

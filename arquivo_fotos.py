@@ -205,3 +205,156 @@ def resumo(pasta_arquivo=None):
 
     return {'fotos': sum(m['fotos'] for m in por_mes.values()),
             'bytes': total_bytes, 'por_mes': por_mes}
+
+
+# ------------------------------------------- fotos que vieram pelo WhatsApp
+MANIFESTO = 'importadas_do_whatsapp.csv'
+
+
+def importar_do_whatsapp(caminhos, loja, tipo, quando=None, pasta_arquivo=None,
+                         mover=False):
+    """Renomeia e arquiva fotos soltas, baixadas do WhatsApp.
+
+    Existe por um problema que nao e de software (02/09/2026), nas palavras dele:
+
+        "meu maior problema e que ele trabalha do jeito que ele quer se eu pedir
+         ele vai fazer durante um tempo e depois ele volta a fazer tudo errado
+         novamente, infelizmente nao tenho controle sobre ele"
+
+    Avisado da mudanca no app, o motorista mandou as fotos pelo WhatsApp. Nao ha
+    como consertar isso pedindo disciplina - entao os DOIS caminhos passam a
+    terminar no mesmo arquivo: se ele usa o app, ja esta arquivado; se manda pelo
+    WhatsApp, ele importa aqui em dois cliques.
+
+    E resolve o impasse do entrada/saida: quem sabe a direcao e QUEM COMBINOU A
+    TRANSFERENCIA, nao o motorista no meio da rua. A direcao entra aqui, uma vez
+    por lote.
+
+    `caminhos`: as fotos, de duas formas que valem igual -
+        - caminho de arquivo no disco (uma pasta de downloads), ou
+        - `(nome_original, bytes)`, que e o que o seletor de arquivos do Painel
+          entrega. Assim ele nao precisa digitar caminho nenhum: escolhe as
+          fotos na janela do Windows, ou arrasta para a tela.
+    `tipo`: "Entrada" ou "Saida" - um lote por ponta da viagem.
+    `quando`: o dia da carga (padrao: hoje). A HORA do nome vem da hora do
+              arquivo quando ela cai no dia escolhido; senao, do meio-dia mais o
+              indice. A hora de foto vinda do WhatsApp e aproximada, e por isso
+              a origem de cada arquivo fica registrada no MANIFESTO.
+
+    Devolve {'arquivadas': [(origem, destino)], 'erros': [...]}.
+    """
+    from datetime import datetime
+    import csv as _csv
+
+    from foto_carga import nome_do_arquivo, preparar_foto
+
+    resultado = {'arquivadas': [], 'erros': []}
+    pasta_arquivo = pasta_arquivo or PASTA_ARQUIVO
+    quando = quando or datetime.now()
+
+    if not str(loja).strip().isdigit():
+        resultado['erros'].append('o numero da loja tem de ser so numero')
+        return resultado
+
+    ok, motivo = destino_disponivel(pasta_arquivo)
+    if not ok:
+        resultado['erros'].append(motivo)
+        return resultado
+
+    mes = quando.strftime('%Y-%m')
+    destino_pasta = os.path.join(pasta_arquivo, mes)
+    os.makedirs(destino_pasta, exist_ok=True)
+
+    def _chave(item):
+        return item[0] if isinstance(item, (tuple, list)) else item
+
+    for i, item in enumerate(sorted(caminhos, key=_chave), start=1):
+        origem = _chave(item)
+        try:
+            if isinstance(item, (tuple, list)):
+                # Veio do seletor do Painel: nome + conteudo, sem disco.
+                bruto = item[1]
+                do_arquivo = None
+            else:
+                with open(origem, 'rb') as f:
+                    bruto = f.read()
+                # A hora: a do arquivo, se for do mesmo dia; senao meio-dia +
+                # indice.
+                try:
+                    do_arquivo = datetime.fromtimestamp(os.path.getmtime(origem))
+                except OSError:
+                    do_arquivo = None
+            if do_arquivo and do_arquivo.date() == quando.date():
+                momento = do_arquivo
+            else:
+                # Sem hora confiavel no arquivo, vale a hora que ELE informou
+                # (ex.: "chegou na 19 as 11:50"). O segundo separa os nomes.
+                momento = quando.replace(second=min(59, i), microsecond=0)
+
+            nome = nome_do_arquivo(momento, tipo, loja, indice=i)
+            destino = os.path.join(destino_pasta, nome)
+            raiz, ext = os.path.splitext(nome)
+            n = 2
+            while os.path.exists(destino):
+                destino = os.path.join(destino_pasta, '%s (%d)%s' % (raiz, n, ext))
+                n += 1
+
+            # Passa pelo mesmo redutor do app: arquivo com tamanhos parecidos, e
+            # foto de 3 MB baixada do celular nao entra crua no arquivo.
+            conteudo, _descricao, _tam = preparar_foto(bruto)
+            with open(destino, 'wb') as f:
+                f.write(conteudo)
+
+            # De onde veio cada arquivo, para a hora aproximada nao virar
+            # afirmacao: o manifesto guarda o nome original e a data da importacao.
+            try:
+                caminho_manifesto = os.path.join(pasta_arquivo, MANIFESTO)
+                novo = not os.path.exists(caminho_manifesto)
+                with open(caminho_manifesto, 'a', encoding='utf-8-sig',
+                          newline='') as f:
+                    escritor = _csv.writer(f, delimiter=';')
+                    if novo:
+                        escritor.writerow(['Importado_em', 'Arquivo_no_arquivo',
+                                           'Nome_original', 'Loja', 'Tipo',
+                                           'Hora_aproximada'])
+                    escritor.writerow([
+                        datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
+                        os.path.basename(destino), os.path.basename(origem),
+                        str(loja).strip(), tipo,
+                        'sim' if not (do_arquivo and do_arquivo.date() == quando.date()) else 'nao'])
+            except Exception:
+                pass          # o manifesto e registro extra, nao pode barrar
+
+            if mover:
+                try:
+                    os.remove(origem)
+                except Exception:
+                    pass
+            resultado['arquivadas'].append((os.path.basename(origem),
+                                            os.path.basename(destino)))
+        except Exception as e:
+            resultado['erros'].append('%s: %s' % (os.path.basename(origem), e))
+
+    return resultado
+
+
+def fotos_soltas(pasta, so_imagens=True):
+    """Os arquivos de imagem de uma pasta que NAO seguem o padrao do sistema.
+
+    Serve para o Painel oferecer o que baixou do WhatsApp sem misturar com o que
+    ja esta arquivado.
+    """
+    if not os.path.isdir(pasta):
+        return []
+    achados = []
+    for nome in sorted(os.listdir(pasta)):
+        caminho = os.path.join(pasta, nome)
+        if not os.path.isfile(caminho):
+            continue
+        if so_imagens and not nome.lower().endswith(('.jpg', '.jpeg', '.png',
+                                                     '.heic', '.heif', '.webp')):
+            continue
+        if partes_do_nome(nome):
+            continue          # ja esta no padrao: veio do app, nao do WhatsApp
+        achados.append(caminho)
+    return achados

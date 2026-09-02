@@ -29,6 +29,7 @@ from datetime import datetime
 import streamlit as st
 
 import arquivo_fotos as af
+import foto_carga as fc          # só para o NOME da loja, na confirmação
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PASTA_PONTE = os.path.join(BASE_DIR, "fotos_recebidas")
@@ -106,7 +107,7 @@ def buscar_e_exibir(tipo):
 
 
 aba_saida, aba_entrada, aba_arquivo = st.tabs(
-    ["📤 SAÍDA", "📥 ENTRADA", "🗄️ ARQUIVO (importar do GitHub)"])
+    ["📤 SAÍDA", "📥 ENTRADA", "🗄️ ARQUIVO (do app e do WhatsApp)"])
 
 with aba_saida:
     buscar_e_exibir("Saida")
@@ -184,6 +185,96 @@ with aba_arquivo:
                         "ponte:\n\n%s\n\nNada foi perdido: na próxima importação "
                         "ele tenta de novo." % saida[:400])
         st.rerun()
+
+    # ------------------------------------------- fotos que vieram pelo WhatsApp
+    st.write("")
+    st.markdown("---")
+    st.subheader("📲 Importar fotos que vieram pelo WhatsApp")
+    st.caption(
+        "Quando ele manda pelo WhatsApp em vez do app — que é o que ele faz: "
+        "salve as fotos e traga aqui. Os dois caminhos terminam no mesmo "
+        "arquivo, então não depende de ele mudar de hábito.")
+
+    # SEM DIGITAR CAMINHO: ele escolhe na janela do Windows ou arrasta as fotos
+    # do WhatsApp Web para cá. A primeira versão pedia o caminho da pasta de
+    # download - dois cliques valem mais do que um caminho colado, e ainda
+    # funciona com foto que está em qualquer lugar.
+    escolhidas = st.file_uploader(
+        "Arraste as fotos aqui, ou clique para escolher:",
+        type=['jpg', 'jpeg', 'png', 'webp'], accept_multiple_files=True,
+        key="zap_arquivos")
+
+    if not escolhidas:
+        st.info("Nada escolhido ainda. No WhatsApp Web: baixe as fotos da "
+                "conversa e arraste para o quadro acima.")
+    else:
+        st.success("**%d foto(s)** prontas para arquivar." % len(escolhidas))
+
+        c1, c2, c3 = st.columns([2, 3, 2])
+        with c1:
+            loja_zap = st.text_input("Número da loja:", key="loja_zap")
+            nome_zap = ""
+            if str(loja_zap).strip().isdigit():
+                nome_zap = fc.nome_da_loja(loja_zap.strip())
+                if nome_zap.startswith("Loja "):
+                    st.warning(nome_zap)
+                else:
+                    st.success(nome_zap)
+        with c2:
+            # "saiu / chegou" em vez de Entrada/Saída: entrada de quê, do
+            # caminhão ou da loja? A palavra tem de dizer sozinha.
+            #
+            # O padrão é CHEGOU porque é o que ele descreveu em 02/09/2026:
+            # "estava chegando na loja 19 e tirou as fotos".
+            direcao = st.radio("Estas fotos são de:",
+                               ["a carga CHEGOU nesta loja",
+                                "a carga SAIU desta loja"], key="dir_zap")
+        with c3:
+            dia_zap = st.date_input("Dia:", datetime.now(), key="dia_zap")
+            hora_zap = st.text_input("Hora (hh:mm):",
+                                     value=datetime.now().strftime("%H:%M"),
+                                     key="hora_zap")
+
+        tipo_zap = "Saida" if "SAIU" in direcao else "Entrada"
+        st.caption(
+            "A hora importa: é ela que põe as fotos na ordem da viagem. Duas "
+            "lojas seguidas no mesmo dia contam a transferência sozinhas — "
+            "o que ele fotografou às 11:50 na 19 e depois na 16 é a mesma carga.")
+
+        if st.button("📲 ARQUIVAR ESTAS FOTOS NO HD", disabled=not ok_hd):
+            hh, mm = 12, 0
+            partes_hora = str(hora_zap).replace('h', ':').split(':')
+            try:
+                hh = int(partes_hora[0])
+                mm = int(partes_hora[1]) if len(partes_hora) > 1 else 0
+            except (ValueError, IndexError):
+                pass
+            if not str(loja_zap).strip().isdigit():
+                st.error("Digite o número da loja — só números.")
+            elif not (0 <= hh <= 23 and 0 <= mm <= 59):
+                st.error("Hora fora do relógio: escreva como 11:50.")
+            else:
+                quando = datetime.combine(dia_zap, datetime.min.time()).replace(
+                    hour=hh, minute=mm)
+                # (nome, bytes): o arquivo escolhido nunca sai do lugar de origem.
+                lote = [(f.name, f.getvalue()) for f in escolhidas]
+                res = af.importar_do_whatsapp(lote, loja_zap.strip(), tipo_zap,
+                                              quando=quando)
+                if res['arquivadas']:
+                    st.success("**%d foto(s) arquivadas** — %s, %s, %s."
+                               % (len(res['arquivadas']),
+                                  fc.nome_da_loja(loja_zap.strip()),
+                                  direcao.replace('a carga ', ''),
+                                  quando.strftime('%d/%m às %H:%M')))
+                    for origem, destino in res['arquivadas'][:12]:
+                        st.write("· %s → **%s**" % (origem, destino))
+                    st.caption(
+                        "A hora do nome é a que você informou — a origem de cada "
+                        "arquivo fica registrada em `%s`, no HD, para depois "
+                        "ninguém confundir foto do app com foto do WhatsApp."
+                        % af.MANIFESTO)
+                if res['erros']:
+                    st.error("Erros:\n\n" + "\n".join(res['erros'][:8]))
 
     if r['por_mes']:
         st.write("")
