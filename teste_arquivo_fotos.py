@@ -169,8 +169,10 @@ def teste_importar_do_whatsapp():
     os.makedirs(downloads)
     # Como o WhatsApp baixa: nome proprio, e uma foto grande de verdade.
     nomes_zap = ['IMG-20260902-WA0007.jpg', 'IMG-20260902-WA0008.jpg']
-    for n in nomes_zap:
-        Image.new('RGB', (3000, 4000), (20, 90, 40)).save(
+    for i, n in enumerate(nomes_zap):
+        # Cores diferentes de propósito: duas fotos IGUAIS agora contam como
+        # uma só, e isso tem prova em teste_whatsapp_nao_reimporta_a_mesma_pasta.
+        Image.new('RGB', (3000, 4000), (20, 90 + i * 40, 40)).save(
             os.path.join(downloads, n), format='JPEG', quality=92)
     # E um arquivo que JA esta no padrao: nao e do WhatsApp, nao entra.
     open(os.path.join(downloads, '2026-09-02_10-00-00-01_ENTRADA_LOJA14.jpg'), 'wb').close()
@@ -208,6 +210,62 @@ def teste_importar_do_whatsapp():
             conteudo = f.read()
         assert 'IMG-20260902-WA0007.jpg' in conteudo, conteudo
         print('ok  foto do WhatsApp vira nome do sistema, reduzida, com manifesto')
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+@com_mundo
+def teste_mesma_foto_com_outro_nome_nao_duplica(ponte, arquivo):
+    """O defeito medido: 181 copias no arquivo dele, uma foto repetida 7x.
+
+    Cada reenvio ganha a hora do momento, logo um NOME novo - so o conteudo
+    denuncia. Foi o caso das 3 fotos identicas da loja 19 em 02/09/2026,
+    gravadas as 11:48:41, :43 e :45.
+    """
+    af.importar(ponte, arquivo)
+    mesmo_conteudo = open(os.path.join(arquivo, '2026-09',
+                                       PONTE[0]), 'rb').read()
+    for hora in ('10-30-05', '10-30-07'):
+        novo = '2026-09-02_%s-01_ENTRADA_LOJA14.jpg' % hora
+        with open(os.path.join(ponte, novo), 'wb') as f:
+            f.write(mesmo_conteudo)
+
+    r = af.importar(ponte, arquivo)
+    assert r['movidas'] == 0, r
+    assert r['ja_existiam'] == 2, r
+    assert len(r['repetidas']) == 2, r['repetidas']
+    # A que ficou e a primeira, e o arquivo NAO cresceu:
+    assert len(os.listdir(os.path.join(arquivo, '2026-09'))) == 2
+    # E as repetidas sairam da ponte, senao voltam a cada importacao:
+    assert not [n for n in os.listdir(ponte) if '10-30-0' in n]
+    print('ok  mesma foto com nome diferente nao entra duas vezes no arquivo')
+
+
+def teste_whatsapp_nao_reimporta_a_mesma_pasta(caminho_ignorado=None):
+    """Importar duas vezes a mesma pasta de download nao dobra o arquivo."""
+    import tempfile as _tmp
+    from datetime import datetime
+    from PIL import Image
+
+    base = _tmp.mkdtemp(prefix='wf_zap4_')
+    try:
+        buf = io.BytesIO()
+        Image.new('RGB', (3000, 4000), (12, 34, 56)).save(buf, format='JPEG',
+                                                          quality=90)
+        lote = [('IMG-20260902-WA0041.jpg', buf.getvalue())]
+        quando = datetime(2026, 9, 2, 11, 50)
+
+        r1 = af.importar_do_whatsapp(lote, '16', 'Saida', quando=quando,
+                                     pasta_arquivo=base)
+        assert len(r1['arquivadas']) == 1 and r1['repetidas'] == [], r1
+
+        # De novo, o mesmo lote - e ainda por cima com outro nome de origem:
+        lote2 = [('IMG-20260902-WA0099.jpg', buf.getvalue())]
+        r2 = af.importar_do_whatsapp(lote2, '16', 'Saida', quando=quando,
+                                     pasta_arquivo=base)
+        assert r2['arquivadas'] == [] and len(r2['repetidas']) == 1, r2
+        assert len(os.listdir(os.path.join(base, '2026-09'))) == 1
+        print('ok  reimportar a mesma foto do WhatsApp nao dobra o arquivo')
     finally:
         shutil.rmtree(base, ignore_errors=True)
 
@@ -268,7 +326,9 @@ if __name__ == '__main__':
     teste_busca_no_arquivo_e_na_ponte()
     teste_resumo_por_mes()
     teste_apagar_do_arquivo()
+    teste_mesma_foto_com_outro_nome_nao_duplica()
     teste_importar_do_whatsapp()
+    teste_whatsapp_nao_reimporta_a_mesma_pasta()
     teste_whatsapp_com_nome_e_bytes()
     teste_whatsapp_recusa_loja_invalida()
     teste_hd_ausente_nao_mente()

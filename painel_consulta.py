@@ -158,6 +158,14 @@ with aba_arquivo:
         if res['ja_existiam']:
             registro.info("%d já estavam no arquivo (reenvio do celular)."
                           % res['ja_existiam'])
+        if res.get('repetidas'):
+            # 11,8% do arquivo dele eram cópias assim, uma foto até 7 vezes.
+            registro.info(
+                "Dessas, %d eram a MESMA foto com outro nome — quem estava na "
+                "rua não viu o ✅ e apertou enviar de novo:\n\n%s"
+                % (len(res['repetidas']),
+                   "\n\n".join("- %s = %s" % (n, ja)
+                               for n, ja in res['repetidas'][:6])))
         if res['ignoradas']:
             registro.warning(
                 "%d arquivo(s) com nome fora do padrão ficaram na ponte, de "
@@ -241,6 +249,23 @@ with aba_arquivo:
             "lojas seguidas no mesmo dia contam a transferência sozinhas — "
             "o que ele fotografou às 11:50 na 19 e depois na 16 é a mesma carga.")
 
+        # O AVISO QUE EVITA A CÓPIA QUE O HASH NÃO PEGA.
+        #
+        # Em 02/09/2026 ele me disse que o motorista mandou as fotos da loja 19
+        # pelo WhatsApp - e o app tinha mandado as mesmas três, às 11:48. Se ele
+        # importasse as do WhatsApp, ficariam seis. Byte a byte elas são
+        # diferentes (o WhatsApp recomprime), então quem decide é ele, vendo.
+        if str(loja_zap).strip().isdigit():
+            ja_tem = af.fotos_de(loja_zap.strip(), dia_zap.strftime("%Y-%m-%d"),
+                                 tipo_zap, pasta_ponte=PASTA_PONTE)
+            if ja_tem:
+                st.warning(
+                    "⚠️ Esta loja **já tem %d foto(s)** de %s nesse dia — "
+                    "provavelmente vieram pelo app. Confira antes de importar, "
+                    "para não ficar com a mesma carga duas vezes:\n\n%s"
+                    % (len(ja_tem), tipo_zap.upper(),
+                       "\n\n".join("- %s" % n for _, n in ja_tem[:8])))
+
         if st.button("📲 ARQUIVAR ESTAS FOTOS NO HD", disabled=not ok_hd):
             hh, mm = 12, 0
             partes_hora = str(hora_zap).replace('h', ':').split(':')
@@ -273,6 +298,13 @@ with aba_arquivo:
                         "arquivo fica registrada em `%s`, no HD, para depois "
                         "ninguém confundir foto do app com foto do WhatsApp."
                         % af.MANIFESTO)
+                if res['repetidas']:
+                    st.info(
+                        "%d foto(s) já estavam no arquivo, iguais byte a byte — "
+                        "não entraram de novo:\n\n%s"
+                        % (len(res['repetidas']),
+                           "\n\n".join("- %s (já era %s)" % (o, d)
+                                       for o, d in res['repetidas'][:8])))
                 if res['erros']:
                     st.error("Erros:\n\n" + "\n".join(res['erros'][:8]))
 

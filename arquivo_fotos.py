@@ -31,6 +31,7 @@ Por que uma pasta por mês: 450 fotos/mês num diretório só viram 20 mil arqui
 em quatro anos, e o Explorer do Windows engasga. Por mês, cada pasta fica com o
 tamanho de uma gaveta.
 """
+import hashlib
 import os
 import shutil
 
@@ -71,6 +72,70 @@ def mes_do_nome(nome):
     return partes[0][:7]
 
 
+def digital(conteudo):
+    """A impressão digital do conteúdo de uma foto (MD5 do arquivo inteiro)."""
+    return hashlib.md5(conteudo).hexdigest()
+
+
+def digital_de_arquivo(caminho, pedaco=1 << 20):
+    """A mesma impressão, lendo do disco sem carregar a foto inteira na memória."""
+    h = hashlib.md5()
+    with open(caminho, 'rb') as f:
+        while True:
+            bloco = f.read(pedaco)
+            if not bloco:
+                break
+            h.update(bloco)
+    return h.hexdigest()
+
+
+def grupo_do_nome(nome):
+    """(dia, tipo, loja) do nome do arquivo, ou None quando não dá para ler.
+
+    É a "gaveta" dentro da qual duas fotos iguais são a MESMA foto. Mais largo
+    do que isso engana: a mesma imagem mandada como SAÍDA da 19 e como ENTRADA
+    da 16 são dois registros diferentes - e se for o motorista reaproveitando
+    foto, isso é coisa que ele tem de VER, não que eu deva esconder.
+    """
+    partes = partes_do_nome(nome)
+    if not partes:
+        return None
+    return (partes[0], partes[2], partes[3])
+
+
+def digitais_da_pasta(pasta, grupo=None):
+    """{impressão: nome} do que já está arquivado ali. {} se a pasta não existe.
+
+    Com `grupo=(dia, tipo, loja)`, só as fotos daquela gaveta entram na conta.
+
+    MEDIDO em 02/09/2026, no arquivo dele: de 1.530 fotos, **1.349 distintas** -
+    181 cópias a mais, 11,8% do arquivo, uma foto repetida SETE vezes. As
+    repetições vêm de maio e junho, com o app antigo, então não é regressão de
+    versão nenhuma: é gente na rua com sinal ruim que não vê o ✅ e aperta enviar
+    de novo. Barrar pelo NOME não resolvia, porque cada envio ganha a hora do
+    momento e portanto um nome novo.
+
+    Isto NÃO pega a mesma carga vinda pelo app e pelo WhatsApp: o WhatsApp
+    recomprime a imagem, e os bytes deixam de ser iguais. Para esse caso o
+    Painel avisa quantas fotos aquela loja já tem no dia e deixa a decisão com
+    ele - palpite disfarçado de certeza é pior do que a cópia.
+    """
+    digitais = {}
+    if not os.path.isdir(pasta):
+        return digitais
+    for nome in sorted(os.listdir(pasta)):
+        caminho = os.path.join(pasta, nome)
+        if not os.path.isfile(caminho):
+            continue
+        if grupo and grupo_do_nome(nome) != tuple(grupo):
+            continue
+        try:
+            digitais.setdefault(digital_de_arquivo(caminho), nome)
+        except OSError:
+            continue
+    return digitais
+
+
 def importar(pasta_ponte, pasta_arquivo=None, mover=True):
     """Leva as fotos da ponte para o arquivo do HD, em pastas por mês.
 
@@ -82,10 +147,13 @@ def importar(pasta_ponte, pasta_arquivo=None, mover=True):
       forma mais rápida de perder prova.
     - Foto que já existe no arquivo (mesmo nome e mesmo tamanho) conta como
       `ja_existiam` e sai da ponte - não é erro, é reimportação.
+    - Foto com o MESMO CONTEÚDO de outra já arquivada no mês também conta como
+      `ja_existiam`, mesmo com nome diferente, e o par vai em `repetidas`:
+      11,8% do arquivo dele eram cópias assim (ver `digitais_da_pasta`).
     - `mover=False` copia em vez de mover, para o teste conferir sem destruir.
     """
     resultado = {'movidas': 0, 'ja_existiam': 0, 'erros': [], 'ignoradas': [],
-                 'nomes': []}
+                 'nomes': [], 'repetidas': []}
     pasta_arquivo = pasta_arquivo or PASTA_ARQUIVO
 
     if not os.path.isdir(pasta_ponte):
@@ -96,6 +164,9 @@ def importar(pasta_ponte, pasta_arquivo=None, mover=True):
     if not ok:
         resultado['erros'].append(motivo)
         return resultado
+
+    # As impressões de cada gaveta (dia+tipo+loja), lidas uma vez só.
+    por_grupo = {}
 
     for nome in sorted(os.listdir(pasta_ponte)):
         origem = os.path.join(pasta_ponte, nome)
@@ -110,6 +181,21 @@ def importar(pasta_ponte, pasta_arquivo=None, mover=True):
         destino = os.path.join(destino_pasta, nome)
         try:
             os.makedirs(destino_pasta, exist_ok=True)
+
+            # O MESMO CONTEÚDO já arquivado na mesma gaveta, com outro nome: é o
+            # mesmo envio repetido por quem não viu o ✅. Conta e sai da ponte.
+            grupo = grupo_do_nome(nome)
+            chave = (mes, grupo)
+            if chave not in por_grupo:
+                por_grupo[chave] = digitais_da_pasta(destino_pasta, grupo)
+            marca = digital_de_arquivo(origem)
+            if marca in por_grupo[chave] and por_grupo[chave][marca] != nome:
+                resultado['repetidas'].append((nome, por_grupo[chave][marca]))
+                resultado['ja_existiam'] += 1
+                if mover:
+                    os.remove(origem)
+                continue
+
             if os.path.exists(destino):
                 if os.path.getsize(destino) == os.path.getsize(origem):
                     if mover:
@@ -128,6 +214,7 @@ def importar(pasta_ponte, pasta_arquivo=None, mover=True):
                 shutil.copy2(origem, destino)
             resultado['movidas'] += 1
             resultado['nomes'].append(os.path.basename(destino))
+            por_grupo[chave][marca] = os.path.basename(destino)
         except Exception as e:
             resultado['erros'].append('%s: %s' % (nome, e))
 
@@ -248,7 +335,7 @@ def importar_do_whatsapp(caminhos, loja, tipo, quando=None, pasta_arquivo=None,
 
     from foto_carga import nome_do_arquivo, preparar_foto
 
-    resultado = {'arquivadas': [], 'erros': []}
+    resultado = {'arquivadas': [], 'erros': [], 'repetidas': []}
     pasta_arquivo = pasta_arquivo or PASTA_ARQUIVO
     quando = quando or datetime.now()
 
@@ -264,6 +351,11 @@ def importar_do_whatsapp(caminhos, loja, tipo, quando=None, pasta_arquivo=None,
     mes = quando.strftime('%Y-%m')
     destino_pasta = os.path.join(pasta_arquivo, mes)
     os.makedirs(destino_pasta, exist_ok=True)
+    # O que já está arquivado NAQUELA GAVETA (dia+tipo+loja), por conteúdo:
+    # importar a mesma pasta de download duas vezes não pode dobrar o arquivo.
+    # A gaveta é lida do PRIMEIRO nome gerado, não montada aqui à mão - quem
+    # sabe escrever o nome é o foto_carga, e adivinhar já custou os "LOJAL9".
+    digitais = None
 
     def _chave(item):
         return item[0] if isinstance(item, (tuple, list)) else item
@@ -292,6 +384,8 @@ def importar_do_whatsapp(caminhos, loja, tipo, quando=None, pasta_arquivo=None,
                 momento = quando.replace(second=min(59, i), microsecond=0)
 
             nome = nome_do_arquivo(momento, tipo, loja, indice=i)
+            if digitais is None:
+                digitais = digitais_da_pasta(destino_pasta, grupo_do_nome(nome))
             destino = os.path.join(destino_pasta, nome)
             raiz, ext = os.path.splitext(nome)
             n = 2
@@ -302,8 +396,18 @@ def importar_do_whatsapp(caminhos, loja, tipo, quando=None, pasta_arquivo=None,
             # Passa pelo mesmo redutor do app: arquivo com tamanhos parecidos, e
             # foto de 3 MB baixada do celular nao entra crua no arquivo.
             conteudo, _descricao, _tam = preparar_foto(bruto)
+
+            # Ja arquivada, byte a byte? Entao e reimportacao da mesma pasta, ou
+            # a mesma foto escolhida duas vezes no mesmo lote.
+            marca = digital(conteudo)
+            if marca in digitais:
+                resultado['repetidas'].append((os.path.basename(origem),
+                                               digitais[marca]))
+                continue
+
             with open(destino, 'wb') as f:
                 f.write(conteudo)
+            digitais[marca] = os.path.basename(destino)
 
             # De onde veio cada arquivo, para a hora aproximada nao virar
             # afirmacao: o manifesto guarda o nome original e a data da importacao.
