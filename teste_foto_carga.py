@@ -175,6 +175,73 @@ def medir_o_que_ja_existe():
         print('fora do padrao (%d):' % len(naos), ', '.join(naos[:5]))
 
 
+class RespostaFalsa:
+    def __init__(self, status, corpo=None, texto=''):
+        self.status_code = status
+        self._corpo = corpo
+        self.text = texto
+
+    def json(self):
+        if self._corpo is None:
+            raise ValueError('não é json')
+        return self._corpo
+
+
+def teste_envio_monta_o_pedido_certo():
+    """O ÚNICO trecho do caminho da foto que nunca havia sido provado."""
+    vistos = {}
+
+    def pedir_falso(url, headers=None, json=None, timeout=None):
+        vistos.update(url=url, headers=headers, corpo=json, timeout=timeout)
+        return RespostaFalsa(201, {'content': {}})
+
+    ok, recado = fc.enviar_ao_github(
+        'tarcisotoledo', 'smfc-sistema', 'fotos_recebidas',
+        '2026-09-02_10-30-00-01_ENTRADA_LOJA14.jpg', b'os bytes da foto',
+        'token-de-mentira', pedir=pedir_falso)
+
+    assert ok and recado == '', (ok, recado)
+    assert vistos['url'] == ('https://api.github.com/repos/tarcisotoledo/'
+                             'smfc-sistema/contents/fotos_recebidas/'
+                             '2026-09-02_10-30-00-01_ENTRADA_LOJA14.jpg'), vistos['url']
+    assert vistos['headers']['Authorization'] == 'token token-de-mentira'
+    # O conteúdo vai em base64, e tem de voltar EXATAMENTE nos bytes originais:
+    import base64 as b64
+    assert b64.b64decode(vistos['corpo']['content']) == b'os bytes da foto'
+    assert 'ENTRADA_LOJA14' in vistos['corpo']['message']
+    assert vistos['timeout'] == 60, 'sem timeout, o celular fica pendurado'
+    print('ok  o envio monta endereco, cabecalho e base64 certos')
+
+
+def teste_envio_diz_o_que_o_github_respondeu():
+    def recusa(url, headers=None, json=None, timeout=None):
+        return RespostaFalsa(422, {'message': 'sha wasn\'t supplied'})
+
+    ok, recado = fc.enviar_ao_github('u', 'r', 'p', 'n.jpg', b'x', 'tok', pedir=recusa)
+    assert not ok
+    assert '422' in recado and 'sha' in recado, recado
+
+    def caiu(url, headers=None, json=None, timeout=None):
+        raise OSError('conexao perdida')
+
+    ok, recado = fc.enviar_ao_github('u', 'r', 'p', 'n.jpg', b'x', 'tok', pedir=caiu)
+    assert not ok and 'internet caiu' in recado, recado
+    print('ok  erro diz o motivo real (422, internet), e nao "verifique o token"')
+
+
+def teste_envio_sem_token_avisa_e_nao_tenta():
+    tentou = []
+
+    def nao_deveria(*a, **k):
+        tentou.append(1)
+        return RespostaFalsa(201, {})
+
+    ok, recado = fc.enviar_ao_github('u', 'r', 'p', 'n.jpg', b'x', '', pedir=nao_deveria)
+    assert not ok and 'GITHUB_TOKEN' in recado, recado
+    assert not tentou, 'nao pode nem tentar sem token'
+    print('ok  sem token avisa e nao vai na rede')
+
+
 if __name__ == '__main__':
     teste_leitura_do_nome()
     teste_nome_do_arquivo()
@@ -185,5 +252,8 @@ if __name__ == '__main__':
     teste_busca_por_loja_nao_casa_por_pedaco()
     teste_foto_da_noite_com_nome_antigo_aparece()
     teste_lista_de_lojas()
+    teste_envio_monta_o_pedido_certo()
+    teste_envio_diz_o_que_o_github_respondeu()
+    teste_envio_sem_token_avisa_e_nao_tenta()
     medir_o_que_ja_existe()
     print('\nTODOS OS TESTES PASSARAM')

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tirar foto</title>
+<!--
+  POR QUE ESTE ARQUIVO EXISTE
+
+  A redução da foto acontecia no SERVIDOR, depois do upload. O celular do
+  motorista subia os 3,2 MB inteiros da câmera - e em 02/09/2026 isso travou:
+  desde a versão nova, ZERO fotos chegaram ao repositório. O celular dele é ruim
+  e o sinal também; os 140 KB de antes passavam, os 3,2 MB não.
+
+  Aqui a foto é reduzida NO PRÓPRIO CELULAR, antes de subir. Sobe ~700 KB em vez
+  de 3,2 MB, com a mesma nitidez de 2048 px que o repositório recebia.
+
+  É um componente ESTÁTICO do Streamlit: só este HTML, sem nada para compilar.
+  A conversa com o Streamlit é o protocolo bruto de postMessage
+  (componentReady / setFrameHeight / setComponentValue), que é o que permite não
+  ter build.
+
+  A orientação vem do EXIF via createImageBitmap({imageOrientation:'from-image'}):
+  sem isso, foto tirada de lado chega deitada, porque o canvas ignora o EXIF.
+-->
+<style>
+  html, body { margin: 0; padding: 0; background: transparent;
+               font-family: "Source Sans Pro", -apple-system, system-ui, sans-serif; }
+  #botao {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; min-height: 78px; box-sizing: border-box;
+    background: #d92d20; color: #fff; border-radius: 12px;
+    font-size: 1.5rem; font-weight: 800; letter-spacing: .5px;
+    cursor: pointer; user-select: none; text-align: center;
+  }
+  #botao:active { background: #a8221a; }
+  input[type=file] { display: none; }
+  #estado { margin-top: 10px; font-size: 1.15rem; font-weight: 700; color: #334155; }
+  #lista { margin-top: 6px; font-size: 1rem; color: #475569; }
+  .erro { color: #b91c1c; }
+</style>
+</head>
+<body>
+  <label id="botao" for="arquivo">📸&nbsp;&nbsp;TIRAR FOTO</label>
+  <input id="arquivo" type="file" accept="image/*" multiple>
+  <div id="estado"></div>
+  <div id="lista"></div>
+
+<script>
+const LADO_MAXIMO_PADRAO = 2048;
+const QUALIDADE = 0.85;
+
+function avisar(tipo, extra) {
+  window.parent.postMessage(Object.assign(
+    {isStreamlitMessage: true, type: tipo}, extra || {}), "*");
+}
+
+function ajustarAltura() {
+  avisar("streamlit:setFrameHeight", {height: document.body.scrollHeight + 8});
+}
+
+function enviarValor(valor) {
+  avisar("streamlit:setComponentValue", {dataType: "json", value: valor});
+}
+
+let ladoMaximo = LADO_MAXIMO_PADRAO;
+
+// O Streamlit manda os argumentos do Python por mensagem.
+window.addEventListener("message", (evento) => {
+  const dados = evento.data;
+  if (!dados || dados.type !== "streamlit:render") return;
+  const args = dados.args || {};
+  if (args.lado_maximo) ladoMaximo = args.lado_maximo;
+  if (args.rotulo) document.getElementById("botao").innerHTML = args.rotulo;
+  ajustarAltura();
+});
+
+async function paraImagem(arquivo) {
+  // createImageBitmap respeita o EXIF - sem isso a foto tirada de lado chega
+  // deitada. Onde ele não existe, cai no <img>, que ao menos funciona.
+  try {
+    return await createImageBitmap(arquivo, {imageOrientation: "from-image"});
+  } catch (e) {
+    return await new Promise((ok, falhou) => {
+      const img = new Image();
+      img.onload = () => ok(img);
+      img.onerror = falhou;
+      img.src = URL.createObjectURL(arquivo);
+    });
+  }
+}
+
+async function reduzir(arquivo) {
+  const img = await paraImagem(arquivo);
+  const largura = img.width, altura = img.height;
+  const escala = Math.min(1, ladoMaximo / Math.max(largura, altura));
+  const w = Math.max(1, Math.round(largura * escala));
+  const h = Math.max(1, Math.round(altura * escala));
+
+  const tela = document.createElement("canvas");
+  tela.width = w; tela.height = h;
+  tela.getContext("2d").drawImage(img, 0, 0, w, h);
+
+  const base64 = tela.toDataURL("image/jpeg", QUALIDADE).split(",")[1];
+  return {
+    nome: arquivo.name || "foto.jpg",
+    base64: base64,
+    de: largura + "x" + altura,
+    para: w + "x" + h,
+    bytes_antes: arquivo.size,
+    bytes_depois: Math.round(base64.length * 3 / 4)
+  };
+}
+
+document.getElementById("arquivo").addEventListener("change", async (e) => {
+  const arquivos = Array.from(e.target.files || []);
+  if (!arquivos.length) return;
+
+  const estado = document.getElementById("estado");
+  const lista = document.getElementById("lista");
+  lista.innerHTML = "";
+  estado.className = "";
+  estado.textContent = "Preparando " + arquivos.length + " foto(s)...";
+  ajustarAltura();
+
+  const prontas = [];
+  for (const arquivo of arquivos) {
+    try {
+      const r = await reduzir(arquivo);
+      prontas.push(r);
+      lista.innerHTML += "✅ " + r.para + " · " +
+                         Math.round(r.bytes_depois / 1024) + " KB<br>";
+    } catch (erro) {
+      // Falhar em reduzir NÃO pode perder a foto: ela vai como veio.
+      try {
+        const cru = await new Promise((ok, falhou) => {
+          const leitor = new FileReader();
+          leitor.onload = () => ok(String(leitor.result).split(",")[1]);
+          leitor.onerror = falhou;
+          leitor.readAsDataURL(arquivo);
+        });
+        prontas.push({nome: arquivo.name || "foto.jpg", base64: cru,
+                      de: "?", para: "sem reduzir",
+                      bytes_antes: arquivo.size, bytes_depois: arquivo.size});
+        lista.innerHTML += "⚠️ enviada sem reduzir<br>";
+      } catch (e2) {
+        lista.innerHTML += "<span class='erro'>❌ não consegui ler esta foto</span><br>";
+      }
+    }
+    ajustarAltura();
+  }
+
+  if (prontas.length) {
+    estado.textContent = prontas.length + " foto(s) prontas — toque em ENVIAR.";
+    // O carimbo de tempo faz o Streamlit ver um valor NOVO mesmo que a pessoa
+    // tire a mesma foto de novo.
+    enviarValor({quando: Date.now(), fotos: prontas});
+  } else {
+    estado.className = "erro";
+    estado.textContent = "Não consegui preparar nenhuma foto.";
+  }
+  ajustarAltura();
+});
+
+window.addEventListener("load", () => {
+  avisar("streamlit:componentReady", {apiVersion: 1});
+  ajustarAltura();
+});
+</script>
+</body>
+</html>

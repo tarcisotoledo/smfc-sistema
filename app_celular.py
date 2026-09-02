@@ -1,32 +1,42 @@
-"""Registro fotográfico de cargas, pelo celular da loja.
+"""Registro fotográfico de cargas, pelo celular do motorista.
 
-## O que estava errado (medido em 01/09/2026, nas 1.528 fotos já recebidas)
+Quem usa: o **motorista** e mais duas pessoas. Ele **não enxerga bem** - por isso
+a tela é grande e o número da loja é digitado (ele pediu de volta em 02/09/2026,
+depois de eu ter posto uma lista de 21 botões), com o NOME da loja aparecendo
+como confirmação do número.
 
-1. **A foto saía como miniatura.** 1.392 das 1.528 tinham **344x421 pixels** —
-   0,14 megapixel, de um celular que fotografa a 12 MP. A culpa era do
-   `st.camera_input`: ele captura o vídeo no tamanho do widget na tela, não no da
-   câmera. Agora quem fotografa é a **câmera do próprio celular** (o
-   `st.file_uploader`, no telefone, oferece a câmera), e o arquivo chega na
-   resolução real.
+## Os quatro defeitos que a versão de 01→02/09/2026 corrigiu, todos medidos
 
-2. **O nome do arquivo estava 3 horas adiantado.** O servidor do Streamlit roda
-   em UTC: foto tirada 12:12 era gravada como `15-12`. Além de confundir, jogava
-   a carga da noite para o dia seguinte — e o Painel busca por data, então a foto
-   ficava invisível.
+1. **Foto miniatura:** 1.392 das 1.528 fotos tinham 344x421 px (0,14 MP), de
+   celulares que fotografam a 12 MP. Culpa do `st.camera_input`, que captura no
+   tamanho do widget na tela.
+2. **Nome 3 horas adiantado:** o Streamlit Cloud roda em UTC, e a carga da noite
+   caía com a data do dia seguinte - invisível para o Painel, que busca por data.
+3. **Peso do upload:** trocar o `camera_input` pelo `file_uploader` fez o celular
+   subir os 3,2 MB inteiros da câmera. Com celular ruim e sinal fraco, ZERO fotos
+   chegaram. Agora a foto é reduzida **no próprio celular** pelo
+   `componente_foto/index.html` (~700 KB), e o `camera_input` ficou como último
+   recurso, num expander fechado.
+4. **Erro que apontava para o lugar errado:** qualquer falha dizia "Verifique o
+   Token", inclusive internet caindo.
 
-3. **Abrir dava trabalho.** Agora a loja entra pelo link já com o número dela
-   (`...?loja=20`), guarda na tela inicial do celular e cai direto na câmera.
-
-As regras (hora, nome, redução) moram em `foto_carga.py`, sem Streamlit, para
-poderem ser testadas — `teste_foto_carga.py`. Aqui fica só a tela.
+As regras (hora, nome, redução, busca, envio) moram em `foto_carga.py`, sem
+Streamlit, para poderem ser testadas - `teste_foto_carga.py`. Aqui fica só a tela.
 """
 import base64
+import os
 import time
 
-import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 import foto_carga as fc
+
+# O componente que reduz a foto NO CELULAR. É um componente estático: só um
+# index.html, sem nada para compilar - ver o comentário dentro do arquivo.
+componente_foto = components.declare_component(
+    "foto_leve",
+    path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "componente_foto"))
 
 GITHUB_USER = "tarcisotoledo"
 GITHUB_REPO = "smfc-sistema"
@@ -34,55 +44,15 @@ PASTA_NO_REPO = "fotos_recebidas"
 
 st.set_page_config(page_title="SMFC Mobile", page_icon="📦")
 
-# O BOTÃO DE TIRAR FOTO.
+# TUDO MAIOR: quem usa isto é o motorista, que não enxerga bem - ele mesmo
+# pediu em 02/09/2026. Não é preferência de estilo, é o que decide se ele
+# consegue trabalhar sem ajuda.
 #
-# O `st.camera_input` antigo mostrava um botão "Tirar Foto" na própria página -
-# e era isso que dava a foto de 344x421, porque ele captura no tamanho do widget.
-# O `st.file_uploader`, que usa a câmera do aparelho e dá a resolução de verdade,
-# vem com um botão que diz "Upload": ninguém olha isso e pensa em fotografar.
-#
-# Então o rótulo do botão é trocado aqui, por CSS. É CSS no documento da própria
-# página (o `st.markdown` injeta no DOM do app, sem iframe), e não um truque de
-# JavaScript mexendo no DOM de fora - se um dia o Streamlit mudar as classes, o
-# botão volta a dizer "Upload" e CONTINUA FUNCIONANDO. A falha é cosmética, não
-# quebra o envio.
+# O botão de tirar foto NÃO está aqui: ele é o `componente_foto/index.html`, que
+# desenha o próprio botão e reduz a foto no celular. Antes era o botão do
+# `file_uploader` renomeado por CSS.
 st.markdown("""
     <style>
-    /* O botão do uploader vira o botão de tirar foto: grande, colorido, e com
-       texto em português. */
-    [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] {
-        width: 100% !important;
-        min-height: 4.2em !important;
-        background-color: #d92d20 !important;
-        border: none !important;
-        border-radius: 12px !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-    }
-    /* Esconde o "Upload" original SEM removê-lo - leitor de tela continua lendo,
-       e o texto novo fica centralizado porque o antigo deixa de ocupar espaço.
-       (É o padrão "visually hidden"; font-size: 0 sozinho descentralizava.) */
-    [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] > * {
-        position: absolute !important;
-        width: 1px !important;
-        height: 1px !important;
-        overflow: hidden !important;
-        clip-path: inset(50%) !important;
-    }
-    [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"]::after {
-        content: "📸  TIRAR FOTO";
-        color: #ffffff;
-        font-size: 1.35rem;
-        font-weight: 800;
-        letter-spacing: .5px;
-    }
-    /* A linha "200MB per file • JPG, PNG..." é do Streamlit e vem em inglês. */
-    [data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }
-
-    /* TUDO MAIOR: quem usa isto é o motorista, que não enxerga bem — ele
-       mesmo pediu em 02/09/2026. Não é preferência de estilo, é o que decide
-       se ele consegue trabalhar sem ajuda. */
     [data-testid="stRadio"] label p { font-size: 1.4rem !important; }
     /* O campo do número da loja: fonte grande e centralizada, para ele
        conferir o que digitou sem aproximar o celular do olho. */
@@ -97,44 +67,20 @@ st.markdown("""
     /* O aviso da loja escolhida, que é a confirmação que evita foto na loja
        errada. */
     [data-testid="stAlert"] p { font-size: 1.5rem !important; font-weight: 700 !important; }
+    /* A linha "200MB per file..." do Streamlit, em inglês, quando aparecer. */
+    [data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
 
 
 def enviar_ao_github(nome, conteudo):
-    """(ok, recado). O recado traz o que o GitHub respondeu, e não um palpite.
-
-    Antes, qualquer falha dizia "Verifique o Token" - inclusive falta de
-    internet e foto repetida. Erro que aponta para o lugar errado custa mais
-    tempo do que erro nenhum.
-    """
+    """So pega o token e chama a regra, que mora em foto_carga (com teste)."""
     try:
         token = st.secrets["GITHUB_TOKEN"]
     except Exception:
-        return False, ("Falta o GITHUB_TOKEN nas Secrets do Streamlit — "
-                       "sem ele nenhuma foto sai.")
-
-    url = "https://api.github.com/repos/%s/%s/contents/%s/%s" % (
-        GITHUB_USER, GITHUB_REPO, PASTA_NO_REPO, nome)
-    try:
-        resposta = requests.put(
-            url,
-            headers={"Authorization": "token %s" % token,
-                     "Accept": "application/vnd.github.v3+json"},
-            json={"message": "Auditoria: %s" % nome,
-                  "content": base64.b64encode(conteudo).decode()},
-            timeout=60)
-    except requests.RequestException as e:
-        return False, "A internet caiu no meio do envio (%s)." % e
-
-    if resposta.status_code in (200, 201):
-        return True, ""
-
-    try:
-        detalhe = resposta.json().get("message", "")
-    except Exception:
-        detalhe = resposta.text[:200]
-    return False, "O GitHub respondeu %s: %s" % (resposta.status_code, detalhe)
+        token = ""
+    return fc.enviar_ao_github(GITHUB_USER, GITHUB_REPO, PASTA_NO_REPO,
+                               nome, conteudo, token)
 
 
 # ------------------------------------------------------------------ a tela
@@ -191,41 +137,48 @@ if st.button("🔄 Trocar de loja", use_container_width=True):
 
 tipo_fluxo = st.radio("Operação:", ["Entrada", "Saída"], horizontal=True)
 
-# file_uploader, e NÃO camera_input: no celular ele abre a câmera do aparelho,
-# que fotografa na resolução de verdade. E aceita várias de uma vez - carga
-# raramente é uma foto só.
-# DOIS CAMINHOS, porque eles custam coisas diferentes - e um deles tem de
-# funcionar SEMPRE.
+# A FOTO É REDUZIDA NO PRÓPRIO CELULAR, antes de subir.
 #
-# Medido em 02/09/2026, o pior jeito de descobrir: depois de eu trocar o
-# `camera_input` pelo `file_uploader`, ZERO fotos chegaram ao repositório (a
-# última foi 01/09 12:12, antes da minha versão). O motorista tentou e a tela
-# ficou em "CONNECTING" com a foto marcada de vermelho.
+# Medido em 02/09/2026, do pior jeito: depois de eu trocar o `camera_input` pelo
+# `file_uploader`, ZERO fotos chegaram ao repositório (a última foi 01/09 12:12,
+# antes da minha versão). O motorista tentou e a tela ficou em "CONNECTING" com
+# a foto de 3,2 MB marcada de vermelho — o celular dele é ruim e o sinal também.
 #
-# A causa é minha: a redução para 2048 px acontece no SERVIDOR, depois do
-# upload. O celular passou a subir os 3,2 MB inteiros da câmera, quando antes
-# subia 140 KB. Em dado móvel, dentro de um caminhão, isso não sobe.
+# A causa era minha: a redução para 2048 px acontecia no SERVIDOR, depois do
+# upload. O celular subia os 3,2 MB inteiros da câmera, quando antes subia 140 KB.
 #
-# Então: a foto nítida continua sendo o caminho principal, e a rápida existe
-# para quando o sinal não deixa. Quem escolhe é quem está lá, sabendo o preço.
+# Agora quem reduz é o `componente_foto/index.html`, rodando no celular: sobem
+# ~700 KB com a mesma nitidez de 2048 px. Provado no navegador antes de publicar:
+# 4000x3000 entra, 2048x1536 sai.
 fotos = []
 
-nitidas = st.file_uploader(
-    "Toque no botão e escolha **Câmera** (ou a galeria, se a foto já está lá):",
-    type=["jpg", "jpeg", "png", "heic", "heif"],
-    accept_multiple_files=True)
-if nitidas:
-    fotos.extend(nitidas)
+valor = componente_foto(lado_maximo=fc.LADO_MAXIMO,
+                        rotulo="📸&nbsp;&nbsp;TIRAR FOTO",
+                        key="camera_leve", default=None)
 
-with st.expander("📶 A foto não sobe? Toque aqui para a FOTO RÁPIDA"):
-    st.caption("A foto rápida é bem menor e sobe com sinal fraco. A nitidez é "
-               "pior — use quando a de cima não conseguir subir.")
-    # Dentro do expander de propósito: o `camera_input` pede permissão de
-    # câmera e liga o vídeo assim que aparece na tela. Fechado, ele não incomoda
-    # quem não precisa dele.
+# O Streamlit reentrega o último valor do componente a cada recarregamento da
+# tela. Sem este carimbo, a mesma foto seria enviada de novo depois do envio.
+if valor and valor.get('fotos') and \
+        st.session_state.get('lote_enviado') != valor.get('quando'):
+    for f in valor['fotos']:
+        try:
+            fotos.append({'bytes': base64.b64decode(f['base64']),
+                          'descricao': '%s → %s' % (f.get('de', '?'), f.get('para', '?')),
+                          'nome': f.get('nome', 'foto.jpg'),
+                          'lote': valor.get('quando')})
+        except Exception:
+            st.error("Uma das fotos chegou quebrada do celular. Tente tirar de novo.")
+
+with st.expander("📶 O botão acima não funcionou? Toque aqui"):
+    st.caption("Esta é a foto rápida: bem menor, sobe até com sinal fraco. A "
+               "nitidez é pior — use só quando a de cima não der conta.")
+    # Dentro do expander fechado de propósito: o `camera_input` pede permissão de
+    # câmera e liga o vídeo assim que aparece na tela.
     rapida = st.camera_input("Foto rápida")
     if rapida:
-        fotos.append(rapida)
+        conteudo, descricao, _ = fc.preparar_foto(rapida.getvalue())
+        fotos.append({'bytes': conteudo, 'descricao': descricao,
+                      'nome': 'foto rápida', 'lote': None})
 
 if fotos:
     st.caption("%d foto(s) prontas para enviar." % len(fotos))
@@ -235,16 +188,18 @@ if fotos:
         barra = st.progress(0.0)
 
         for i, foto in enumerate(fotos, start=1):
-            conteudo, mudanca, tamanho = fc.preparar_foto(foto.getvalue())
             nome = fc.nome_do_arquivo(quando, tipo_fluxo, loja, indice=i)
-            ok, recado = enviar_ao_github(nome, conteudo)
+            ok, recado = enviar_ao_github(nome, foto['bytes'])
             if ok:
                 enviadas += 1
                 # O tamanho aparece na tela de propósito: é assim que se vê que a
                 # foto deixou de ser miniatura.
-                st.success("✅ %s  ·  %s  ·  %d KB" % (nome, mudanca, tamanho // 1024))
+                st.success("✅ %s  ·  %s  ·  %d KB"
+                           % (nome, foto['descricao'], len(foto['bytes']) // 1024))
+                if foto['lote']:
+                    st.session_state['lote_enviado'] = foto['lote']
             else:
-                falhas.append((foto.name, recado))
+                falhas.append((foto['nome'], recado))
             barra.progress(i / len(fotos))
 
         if falhas:

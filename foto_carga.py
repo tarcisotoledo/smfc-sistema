@@ -20,6 +20,7 @@ O "-01" no fim da hora desempata fotos tiradas no mesmo segundo. Nomes antigos
 não têm essa parte, e alguns não têm nem os segundos - os dois casos continuam
 sendo lidos.
 """
+import base64
 import io
 import os
 import re
@@ -196,3 +197,48 @@ def fotos_de(pasta, loja, data_str, tipo, corte_do_fuso="2026-09-01"):
             herdadas.append(nome)
 
     return do_dia, herdadas
+
+# ------------------------------------------------- o envio para o repositorio
+CAMINHO_API = "https://api.github.com/repos/%s/%s/contents/%s/%s"
+
+
+def enviar_ao_github(usuario, repo, pasta, nome, conteudo, token, pedir=None):
+    """Manda a foto para o repositorio. Devolve (ok, recado).
+
+    Mora aqui, e nao na tela, para PODER SER TESTADO: `pedir` e o requests.put,
+    e o teste passa um falso para conferir o endereco, o cabecalho e o corpo.
+    Este era o unico trecho do caminho da foto que nunca tinha sido provado - e
+    em 02/09/2026 eu publiquei duas coisas quebradas justamente por confiar em
+    trecho nao provado.
+
+    O recado traz o que o GitHub respondeu, e nao um palpite: antes, qualquer
+    falha dizia "Verifique o Token", inclusive internet caindo e foto repetida.
+    """
+    if not token:
+        return False, ("Falta o GITHUB_TOKEN nas Secrets do Streamlit - "
+                       "sem ele nenhuma foto sai.")
+    if pedir is None:
+        import requests
+        pedir = requests.put
+
+    url = CAMINHO_API % (usuario, repo, pasta, nome)
+    try:
+        resposta = pedir(
+            url,
+            headers={"Authorization": "token %s" % token,
+                     "Accept": "application/vnd.github.v3+json"},
+            json={"message": "Auditoria: %s" % nome,
+                  "content": base64.b64encode(conteudo).decode()},
+            timeout=60)
+    except Exception as e:
+        return False, "A internet caiu no meio do envio (%s)." % e
+
+    if getattr(resposta, 'status_code', None) in (200, 201):
+        return True, ""
+
+    detalhe = ""
+    try:
+        detalhe = resposta.json().get("message", "")
+    except Exception:
+        detalhe = str(getattr(resposta, 'text', ''))[:200]
+    return False, "O GitHub respondeu %s: %s" % (resposta.status_code, detalhe)
