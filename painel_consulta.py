@@ -22,6 +22,7 @@ ao corte, as três primeiras horas do dia seguinte: é lá que a foto da noite
 anterior foi arquivada. Ver a explicação em `app_celular.py`.
 """
 import os
+import subprocess
 from datetime import datetime, timedelta
 
 import streamlit as st
@@ -101,6 +102,40 @@ with aba_faxina:
              "O GitHub continua com todas — isto é só o espaço do disco daqui."
              % DIAS_DA_FAXINA)
 
+    # Depois da faxina, o git passa a ver aquelas fotos como APAGADAS no diretório
+    # de trabalho. Elas continuam no GitHub, mas um "commit de tudo" as levaria
+    # embora de lá também. Isso apareceu de verdade em 02/09/2026, quando a
+    # faxina tirou 225 fotos do disco - o aviso e o botão de restaurar existem
+    # para que isso nunca seja uma surpresa.
+    def _apagadas_no_git():
+        try:
+            saida = subprocess.run(
+                ['git', 'status', '--porcelain', 'fotos_recebidas'],
+                cwd=BASE_DIR, capture_output=True, text=True, timeout=30).stdout
+            return [l[3:].strip() for l in saida.splitlines() if l.startswith(' D')]
+        except Exception:
+            return []
+
+    apagadas = _apagadas_no_git()
+    if apagadas:
+        st.warning(
+            "⚠️ **%d foto(s) já foram apagadas do disco** por uma faxina anterior. "
+            "Elas continuam no GitHub.\n\n"
+            "Enquanto estiverem assim, **não faça `git add .` nem commit de tudo** "
+            "nesta pasta: isso apagaria essas fotos do GitHub também. O envio das "
+            "fotos novas pelo celular não é afetado." % len(apagadas))
+        if st.button("🔄 TRAZER AS APAGADAS DE VOLTA DO GITHUB"):
+            try:
+                r = subprocess.run(['git', 'checkout', '--', 'fotos_recebidas'],
+                                   cwd=BASE_DIR, capture_output=True, text=True,
+                                   timeout=180)
+                if r.returncode == 0:
+                    st.success("Pronto: as %d voltaram para o disco." % len(apagadas))
+                else:
+                    st.error("O git recusou: %s" % (r.stderr or r.stdout)[:300])
+            except Exception as e:
+                st.error("Não consegui restaurar: %s" % e)
+
     if not os.path.isdir(PASTA_FOTOS):
         st.info("A pasta de fotos ainda não existe nesta máquina.")
     else:
@@ -130,14 +165,18 @@ with aba_faxina:
                 if not confirmou:
                     st.warning("Marque a confirmação acima antes de apagar.")
                 else:
-                    apagadas, erros = 0, []
+                    # `removidas`, e não `apagadas`: este nome já é a lista das
+                    # que o git vê como apagadas, lá em cima.
+                    removidas, erros = 0, []
                     for nome in velhas:
                         try:
                             os.remove(os.path.join(PASTA_FOTOS, nome))
-                            apagadas += 1
+                            removidas += 1
                         except Exception as e:
                             erros.append("%s (%s)" % (nome, e))
-                    st.success("%d foto(s) apagadas da cópia local." % apagadas)
+                    st.success("%d foto(s) apagadas da cópia local. Elas continuam "
+                               "no GitHub — se precisar delas aqui, use o botão de "
+                               "trazer de volta, no alto desta aba." % removidas)
                     if erros:
                         st.error("Não consegui apagar %d: %s"
                                  % (len(erros), "; ".join(erros[:5])))
