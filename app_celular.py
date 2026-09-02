@@ -32,6 +32,28 @@ import streamlit.components.v1 as components
 
 import foto_carga as fc
 
+# O Streamlit RE-EXECUTA este arquivo a cada toque na tela, mas mantém os módulos
+# importados em memória. Quando um commit acrescenta uma função ao foto_carga e o
+# processo não reinicia, fica valendo o app NOVO com o módulo VELHO - e o erro que
+# aparece é um "AttributeError" com a mensagem escondida ("redacted to prevent
+# data leaks"), que não diz nada a quem está com o celular na mão.
+#
+# Aconteceu em 02/09/2026, no primeiro envio depois de eu mover o
+# `enviar_ao_github` para o foto_carga. Isto troca o erro por uma instrução.
+_FALTANDO = [_nome for _nome in ('enviar_ao_github', 'preparar_foto',
+                                 'nome_do_arquivo', 'agora_brasil',
+                                 'nome_da_loja', 'LADO_MAXIMO')
+             if not hasattr(fc, _nome)]
+if _FALTANDO:
+    st.error(
+        "### ⚠️ O aplicativo precisa ser reiniciado\n\n"
+        "Ele está rodando uma versão antiga de um pedaço do programa "
+        "(falta: %s).\n\n"
+        "**Não é problema do celular nem da foto.** Quem reinicia é o Tarciso: "
+        "no Streamlit Cloud, canto de baixo à direita → **Manage app** → menu "
+        "de três pontos → **Reboot app**." % ", ".join(_FALTANDO))
+    st.stop()
+
 # O componente que reduz a foto NO CELULAR. É um componente estático: só um
 # index.html, sem nada para compilar - ver o comentário dentro do arquivo.
 componente_foto = components.declare_component(
