@@ -155,15 +155,38 @@ if 'numero_loja' not in st.session_state:
     if st.button("CONFIRMAR ➡️", use_container_width=True, type="primary"):
         if numero.isdigit():
             st.session_state.numero_loja = numero
+            # A LOJA VAI PARA O ENDEREÇO, e não só para a memória da sessão.
+            #
+            # Por que (03/09/2026): o celular do motorista fica sem memória, o
+            # Chrome mata a aba no meio do envio e a sessão do Streamlit morre
+            # com ela. Ele voltava para o começo, tendo que digitar o número
+            # outra vez - foi exatamente a reclamação dele. Com a loja no
+            # endereço, recarregar cai já na câmera.
+            try:
+                st.query_params["loja"] = numero
+            except Exception:
+                pass          # versão antiga do Streamlit: segue sem isso
             st.rerun()
         else:
             st.error("Digite o número da loja antes de continuar.")
     st.stop()
 
 loja = st.session_state.numero_loja
+# Mantém a loja no endereço mesmo quando ela veio da sessão: se a aba
+# recarregar sozinha, o número sobrevive.
+try:
+    if str(st.query_params.get("loja", "")).strip() != str(loja):
+        st.query_params["loja"] = str(loja)
+except Exception:
+    pass
+
 st.info("📍 %s" % fc.nome_da_loja(loja))
 if st.button("🔄 Trocar de loja", use_container_width=True):
     del st.session_state.numero_loja
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
     st.rerun()
 
 tipo_fluxo = st.radio("Operação:", ["Entrada", "Saída"], horizontal=True)

@@ -109,18 +109,73 @@ async function paraImagem(arquivo) {
   }
 }
 
+// O TAMANHO DA FOTO, sem decodificar a imagem inteira.
+//
+// Um <img> entrega naturalWidth/naturalHeight lendo praticamente só o
+// cabeçalho do JPEG. Serve para calcular o alvo ANTES de decodificar - e é o
+// que permite pedir ao navegador a imagem já reduzida.
+async function dimensoes(arquivo) {
+  const url = URL.createObjectURL(arquivo);
+  try {
+    const img = new Image();
+    await new Promise((ok, falhou) => {
+      img.onload = ok; img.onerror = falhou; img.src = url;
+    });
+    return {w: img.naturalWidth, h: img.naturalHeight};
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 async function reduzir(arquivo) {
-  const img = await paraImagem(arquivo);
-  const largura = img.width, altura = img.height;
-  const escala = Math.min(1, ladoMaximo / Math.max(largura, altura));
-  const w = Math.max(1, Math.round(largura * escala));
-  const h = Math.max(1, Math.round(altura * escala));
+  // DECODIFICAR JÁ NO TAMANHO FINAL. Isto existe por causa do celular do
+  // motorista (03/09/2026): a tela dele mostrou "Devido à insuficiência de
+  // memória, não foi possível concluir a operação anterior", o Chrome matou a
+  // aba no meio do envio e ele voltou para o começo do programa.
+  //
+  // Uma foto de 12 MP decodificada inteira ocupa ~48 MB (4 bytes por pixel), e
+  // só DEPOIS era encolhida. Pedindo resizeWidth/resizeHeight ao
+  // createImageBitmap, o navegador decodifica já reduzido: ~12 MB em vez de
+  // 48. Onde isso não existir, o caminho antigo continua valendo.
+  let alvo = null, largura = 0, altura = 0;
+  try {
+    const d = await dimensoes(arquivo);
+    largura = d.w; altura = d.h;
+    const escala = Math.min(1, ladoMaximo / Math.max(d.w, d.h));
+    alvo = {w: Math.max(1, Math.round(d.w * escala)),
+            h: Math.max(1, Math.round(d.h * escala))};
+  } catch (e) {
+    alvo = null;                     // não deu para saber: decodifica inteiro
+  }
+
+  let img;
+  try {
+    img = await createImageBitmap(arquivo, alvo
+      ? {imageOrientation: "from-image", resizeWidth: alvo.w,
+         resizeHeight: alvo.h, resizeQuality: "high"}
+      : {imageOrientation: "from-image"});
+  } catch (e) {
+    img = await paraImagem(arquivo);
+  }
+
+  // O corte final sai SEMPRE de img.width/height, nunca do alvo calculado: se
+  // o EXIF girar a foto, quem tem a medida certa é a imagem decodificada.
+  if (!largura) { largura = img.width; altura = img.height; }
+  const escala = Math.min(1, ladoMaximo / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * escala));
+  const h = Math.max(1, Math.round(img.height * escala));
 
   const tela = document.createElement("canvas");
   tela.width = w; tela.height = h;
   tela.getContext("2d").drawImage(img, 0, 0, w, h);
 
+  // Solta o bitmap decodificado AGORA, sem esperar o coletor de lixo. Num
+  // celular no limite, esperar é o que derruba a aba.
+  if (img.close) { try { img.close(); } catch (e) {} }
+
   const base64 = tela.toDataURL("image/jpeg", QUALIDADE).split(",")[1];
+  tela.width = 0; tela.height = 0;   // libera a memória do canvas
+
   return {
     nome: arquivo.name || "foto.jpg",
     base64: base64,
